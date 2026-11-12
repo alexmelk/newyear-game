@@ -480,6 +480,36 @@ function draw3dGround() {
   }
 }
 
+// Векторный Дед Мороз: на некоторых машинах emoji в canvas рисуются серым
+// силуэтом — рисуем героя цветовыми фигурами, яркость гарантирована везде.
+// Центр в (0,0), «ступни» ~y=+44*s, рост ~100*s.
+function drawSanta(s) {
+  ctx.save(); ctx.scale(s, s); ctx.translate(0, 12);
+  ctx.fillStyle = "#d92b2b"; ctx.fillRect(-40, -6, 13, 27); ctx.fillRect(27, -6, 13, 27);   // руки
+  ctx.fillStyle = "#ef3b3b";                                                                  // тулуп
+  ctx.beginPath(); ctx.moveTo(-27, 31); ctx.quadraticCurveTo(-31, -8, -13, -15);
+  ctx.lineTo(13, -15); ctx.quadraticCurveTo(31, -8, 27, 31); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.fillRect(-28, 25, 56, 7);                                        // меховая оторочка подола
+  ctx.fillStyle = "#8a5a25"; ctx.fillRect(-28, 6, 56, 7);                                     // пояс
+  ctx.fillStyle = "#ffd75e"; ctx.fillRect(-6, 4, 12, 11);                                     // пряжка
+  ctx.fillStyle = "#fff";
+  ctx.beginPath(); ctx.arc(-33, 24, 7.5, 0, 6.29); ctx.fill();                                // варежки
+  ctx.beginPath(); ctx.arc(33, 24, 7.5, 0, 6.29); ctx.fill();
+  ctx.fillStyle = "#ffd9b3"; ctx.beginPath(); ctx.arc(0, -25, 14, 0, 6.29); ctx.fill();       // лицо
+  ctx.fillStyle = "#fff";                                                                     // борода
+  ctx.beginPath(); ctx.moveTo(-12, -23); ctx.quadraticCurveTo(-13, -5, 0, -3);
+  ctx.quadraticCurveTo(13, -5, 12, -23); ctx.quadraticCurveTo(0, -17, -12, -23); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#25335e";
+  ctx.beginPath(); ctx.arc(-5, -28, 2, 0, 6.29); ctx.fill();                                  // глаза
+  ctx.beginPath(); ctx.arc(5, -28, 2, 0, 6.29); ctx.fill();
+  ctx.fillStyle = "#ff9d8a"; ctx.beginPath(); ctx.arc(0, -24, 2.4, 0, 6.29); ctx.fill();      // нос
+  ctx.fillStyle = "#d92b2b";                                                                  // шапка
+  ctx.beginPath(); ctx.moveTo(-16, -32); ctx.quadraticCurveTo(-2, -56, 18, -42); ctx.lineTo(16, -32); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.fillRect(-17, -35, 34, 7);
+  ctx.beginPath(); ctx.arc(21, -41, 5.5, 0, 6.29); ctx.fill();                                // помпон
+  ctx.restore();
+}
+
 function draw3dItems() {
   const all = [];
   for (const g of gifts) all.push({ kind: "gift", o: g });
@@ -512,7 +542,7 @@ function draw3dItems() {
   const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
   ctx.globalAlpha = blink ? .45 : 1;
   ctx.save(); ctx.translate(W / 2, py); ctx.rotate((lane - laneF) * .35);
-  ctx.font = "148px " + EMOJI_FONT; ctx.fillText("🎅", 0, 0);
+  drawSanta(1.6);
   ctx.restore();
   ctx.globalAlpha = 1;
 }
@@ -846,9 +876,8 @@ function draw() {
       // дед мороз
       const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
       ctx.globalAlpha = blink ? 0.45 : 1;
-      ctx.font = 72 + "px " + EMOJI_FONT;
       ctx.save(); ctx.translate(player.x, player.y); ctx.rotate((player.tx - player.x) * 0.002);
-      ctx.fillText("🎅", 0, 0);
+      drawSanta(0.85);
       ctx.restore();
       ctx.globalAlpha = 1;
     }
