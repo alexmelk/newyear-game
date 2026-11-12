@@ -28,6 +28,7 @@ button:active { transform: scale(.97); }
 .hidden { display: none !important; }
 
 #sndBtn { position: absolute; right: 12px; top: 12px; z-index: 11; }
+#trkBtn { position: absolute; right: 12px; top: 58px; z-index: 11; max-width: 52vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #verTag {
   position: absolute; left: 10px; top: 8px; z-index: 6; font: 11px Consolas, monospace;
   color: rgba(160, 180, 230, .75); pointer-events: none;

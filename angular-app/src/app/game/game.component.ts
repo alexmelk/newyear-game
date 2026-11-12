@@ -85,6 +85,7 @@ import { VERSION, SUPABASE_URL } from "../core/config";
     <button id="sndBtn" class="mini" *ngIf="uiState !== 'menu'" (click)="toggleMusic()">
       {{ engine && engine.musicOn ? '🔊 Музыка' : '🔇 Музыка' }}
     </button>
+    <button id="trkBtn" class="mini" *ngIf="mp3On && trackIdx >= 0" (click)="nextTrack()">🎵 {{ tracks[trackIdx].t }} ⏭</button>
     <div id="verTag">v{{ version }}</div>
     <button id="exitRep" class="mini" *ngIf="engine?.REPLAYING" (click)="exitReplay()">✕ Выйти из реплея</button>
     <button id="repCheat" class="mini" *ngIf="engine?.REPLAYING && replayId"
@@ -157,7 +158,7 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
           this.cdr.markForCheck();
         }),
         onGameOver: (d) => this.zone.run(() => this.handleGameOver(d)),
-        onMusic: () => this.cdr.markForCheck(),
+        onMusic: () => { this.syncMp3Volume(); this.cdr.markForCheck(); },
         onError: (m) => this.zone.run(() => this.showError(m)),
         onDevToggle: () => this.zone.run(() => this.toggleDev()),
         onDebugChange: () => this.cdr.markForCheck(),
@@ -174,12 +175,19 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }, 500);
     window.addEventListener("error", this.onWinErr);
+    this.zone.runOutsideAngular(() => {           // MP3-фон стартует при первом жесте (политика автоплея)
+      window.addEventListener("pointerdown", this.tryStartMp3);
+      window.addEventListener("keydown", this.tryStartMp3);
+    });
   }
 
   ngOnDestroy() {
     if (this.engine) this.engine.destroy();
     if (this.devTimer) clearInterval(this.devTimer);
     window.removeEventListener("error", this.onWinErr);
+    window.removeEventListener("pointerdown", this.tryStartMp3);
+    window.removeEventListener("keydown", this.tryStartMp3);
+    if (this.mp3) { this.mp3.pause(); this.mp3.src = ""; }
   }
   private onWinErr = (e: ErrorEvent) => this.showError(e.message || "JS error");
 
@@ -245,6 +253,56 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /* ---------- музыка ---------- */
   toggleMusic() { if (this.engine) this.engine.setMusic(!this.engine.musicOn); }
+
+  /* ---------- MP3-фон: случайный трек, переключение кнопкой ---------- */
+  tracks = [
+    { f: "assets/music/jingle-bells.mp3", t: "Jingle Bells — F. Sinatra" },
+    { f: "assets/music/let-it-snow.mp3", t: "Let It Snow — F. Sinatra" },
+    { f: "assets/music/perviy-sneg.mp3", t: "Первый снег пошёл" },
+  ];
+  mp3: HTMLAudioElement | null = null;
+  mp3On = false;            // MP3 играет → синтеж-мелодия движка выключена (SFX остаются)
+  trackIdx = -1;
+  private mp3Started = false;
+
+  tryStartMp3 = () => {
+    if (this.mp3Started) return;
+    if (!this.mp3) {
+      const a = new Audio();
+      a.preload = "auto"; a.volume = 0.85;
+      a.addEventListener("ended", () => this.nextTrack());
+      a.addEventListener("error", () => {          // файл недоступен — остаёмся на синтеж-музыке
+        this.mp3Started = true; this.mp3On = false;
+        this.engine?.setMp3Mode(false);
+        window.removeEventListener("pointerdown", this.tryStartMp3);
+        window.removeEventListener("keydown", this.tryStartMp3);
+        this.cdr.markForCheck();
+      });
+      this.trackIdx = Math.floor(Math.random() * this.tracks.length);   // старт со случайного трека
+      a.src = this.tracks[this.trackIdx].f;
+      this.mp3 = a;
+    }
+    Promise.resolve(this.mp3.play()).then(() => {
+      this.mp3Started = true; this.mp3On = true;
+      this.engine?.setMp3Mode(true);
+      this.syncMp3Volume();
+      window.removeEventListener("pointerdown", this.tryStartMp3);
+      window.removeEventListener("keydown", this.tryStartMp3);
+      this.cdr.markForCheck();
+    }).catch(() => { /* автоплей ещё нельзя — ждём следующего клика/клавиши */ });
+  };
+
+  nextTrack() {
+    if (!this.mp3 || !this.mp3Started) return;
+    this.trackIdx = (this.trackIdx + 1) % this.tracks.length;
+    this.mp3.src = this.tracks[this.trackIdx].f;
+    Promise.resolve(this.mp3.play()).catch(() => {});
+    this.cdr.markForCheck();
+  }
+
+  syncMp3Volume() {
+    if (this.mp3 && this.engine) this.mp3.volume = this.engine.musicOn ? 0.85 : 0;
+  }
 
   /* ---------- реплеи ---------- */
   openReplay(id: number | string) { location.href = "?replay=" + encodeURIComponent(id); }

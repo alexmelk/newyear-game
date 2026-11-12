@@ -36,8 +36,9 @@ export class GameEngine {
   LANE_W = 3; Z_PL = 2.6; Z_FAR = 100; FOC = 360; HOR = 800 * 0.40; KY = 990;
 
   // ---- зумба (3-я зона, расписание v2) ----
-  zuma = false; wasZone = "2d"; simV = 2; zc: any = null;
-  zPath: any[] = []; zLen = 0; zAim: any = { x: 240, y: 300 };
+  zuma = false; wasZone = "2d"; simV = 4; zc: any = null;
+  zPath: any[] = []; zLen = 0; zPathS: any[] = []; zLenS = 0; zPathSp: any[] = []; zLenSp = 0;
+  zAim: any = { x: 240, y: 300 };
   static ZEMOJI: any = { g: "🎁", s: "❄️", t: "🎄", b: "⭐" };
 
   // ---- детерминизм / реплеи ----
@@ -50,6 +51,7 @@ export class GameEngine {
 
   // ---- музыка ----
   ac: any = null; master: any = null; musicOn = true; loopStartT = 0; schedTimer: any = null;
+  melodyOn = true; musicNodes: any[] = [];   // синтеж-мелодия выключается, когда играет MP3-фон
   BPM = 138; BEAT = 60 / 138;
   MELODY = [
     [0,1,64],[1,1,64],[2,2,64],[4,1,64],[5,1,64],[6,2,64],
@@ -175,7 +177,7 @@ export class GameEngine {
 
   /* ================= музыка ================= */
   midiF(m: number) { return 440 * Math.pow(2, (m - 69) / 12); }
-  tone(t: number, freq: number, dur: number, type: string, vol: number, det: number) {
+  tone(t: number, freq: number, dur: number, type: string, vol: number, det: number, collect?: any[]) {
     const ac = this.ac as any;
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.value = freq; if (det) o.detune.value = det;
@@ -184,21 +186,26 @@ export class GameEngine {
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.master);
     o.start(t); o.stop(t + dur + 0.05);
+    if (collect) collect.push({ g, o, end: t + dur + 0.05 });
   }
   scheduleLoop(t0: number) {
     for (const [b, d, m] of this.MELODY as any[]) {
       const t = t0 + b * this.BEAT;
-      this.tone(t, this.midiF(m), d * this.BEAT * 0.9, "triangle", 0.24, 0);
-      this.tone(t, this.midiF(m + 12), d * this.BEAT * 0.9, "sine", 0.06, 6);
+      this.tone(t, this.midiF(m), d * this.BEAT * 0.9, "triangle", 0.24, 0, this.musicNodes);
+      this.tone(t, this.midiF(m + 12), d * this.BEAT * 0.9, "sine", 0.06, 6, this.musicNodes);
     }
     for (let i = 0; i < this.LOOP_BEATS; i += 2) {
-      this.tone(t0 + i * this.BEAT, this.midiF(this.BASS[Math.floor(i / 4) % this.BASS.length] - 12), this.BEAT * 1.6, "sine", 0.16, 0);
+      this.tone(t0 + i * this.BEAT, this.midiF(this.BASS[Math.floor(i / 4) % this.BASS.length] - 12), this.BEAT * 1.6, "sine", 0.16, 0, this.musicNodes);
     }
   }
   ensureMusic() {
     if (!this.ac || !this.musicOn) return;
-    const horizon = this.ac.currentTime + 5;
-    while (this.loopStartT < horizon) { this.scheduleLoop(this.loopStartT); this.loopStartT += this.LOOP_BEATS * this.BEAT; }
+    if (this.melodyOn) {
+      const horizon = this.ac.currentTime + 5;
+      while (this.loopStartT < horizon) { this.scheduleLoop(this.loopStartT); this.loopStartT += this.LOOP_BEATS * this.BEAT; }
+    }
+    const now = this.ac.currentTime;
+    while (this.musicNodes.length && this.musicNodes[0].end < now) this.musicNodes.shift();
   }
   startMusic() {
     if (!this.ac) {
@@ -220,6 +227,15 @@ export class GameEngine {
     this.musicOn = on;
     if (this.master) this.master.gain.value = on ? 0.6 : 0;
     if (this.hooks.onMusic) this.hooks.onMusic(on);
+  }
+  setMp3Mode(on: boolean) {
+    // играет MP3-фон: синтеж-мелодия гаснет немедленно (заготовленные ноты обрываются), SFX остаются
+    this.melodyOn = !on;
+    if (on && this.ac) {
+      const now = this.ac.currentTime;
+      for (const n of this.musicNodes) { try { n.g.gain.cancelScheduledValues(now); n.g.gain.setTargetAtTime(0.0001, now, 0.04); n.o.stop(now + 0.2); } catch (e) { /* уже остановлен */ } }
+      this.musicNodes = [];
+    } else if (!on && this.ac) this.loopStartT = Math.max(this.loopStartT, this.ac.currentTime + 0.1);
   }
 
   /* ================= мир ================= */
@@ -247,10 +263,12 @@ export class GameEngine {
     this.tGift = 0.6; this.tSnow = 1.4;
     this.mode3d = this.zuma = false; this.wasZone = "2d"; this.zc = null;
     this.lane = this.laneF = 0; this.prepT = 0; this.zoff = 0;
-    this.simV = this.REPLAYING && this.scripted ? Math.min(3, Math.max(1, this.scripted.data.v | 0) || 1) : 3;
+    this.simV = this.REPLAYING && this.scripted ? Math.min(4, Math.max(1, this.scripted.data.v | 0) || 1) : 4;
+    this.zPath = this.simV >= 4 ? this.zPathSp : this.zPathS;
+    this.zLen = this.simV >= 4 ? this.zLenSp : this.zLenS;
     this.seed0 = (this.round ? this.round.seed : Math.random() * 4294967296) >>> 0;
     this.rng = this.mulberry32(this.seed0);
-    if (!this.REPLAYING) this.rec = { v: 3, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
+    if (!this.REPLAYING) this.rec = { v: 4, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
     this.makeBack();
   }
 
@@ -276,7 +294,7 @@ export class GameEngine {
   proj(xRel: number, z: number) { return { X: this.W / 2 + xRel * this.FOC / z, Y: this.HOR + this.KY / z, s: this.FOC / z }; }
   fade(z: number) { return Math.max(0.05, Math.min(1, (this.Z_FAR - z) / 45)); }
   relX(o: any) { return (o.lane - this.laneF) * this.LANE_W + (o.ox || 0); }
-  run3() { return 42 + 12 * this.diff(); }
+  run3() { return this.simV >= 4 ? 30 + 8 * this.diff() : 42 + 12 * this.diff(); }   // v4 — 3D медленнее
   makeTrees3() {
     this.trees3 = [];
     for (let i = 0; i < 18; i++) this.trees3.push({ x: (Math.random() < .5 ? -1 : 1) * (5.4 + Math.random() * 5), z: Math.random() * this.Z_FAR, s: .7 + Math.random() * .9 });
@@ -431,6 +449,7 @@ export class GameEngine {
       if (this.mode3d) this.makeTrees3();
       else { this.player.tx = this.W / 2; }
       if (this.zuma) this.zInit();
+      else this.player.y = this.H - 110;   // вернуть деда на пол (после центра спирали v4)
     }
 
     if (this.mode3d) this.update3d(dt); else if (this.zuma) this.updateZuma(dt); else this.update2d(dt);
@@ -497,7 +516,7 @@ export class GameEngine {
 
   /* ================= зумба (3-я зона) ================= */
   buildZPath() {
-    // тропка цепочки: старт сверху за экраном, S-изгибы, финиш у деда Мороза
+    // --- тропка v2/v3: S-изгибы сверху вниз ---
     const pts = [[240, -40], [70, 90], [420, 150], [430, 300], [150, 330], [60, 480], [300, 520], [430, 640], [240, 655]];
     const cat = (p0: any, p1: any, p2: any, p3: any, t: number) => {
       const t2 = t * t, t3 = t2 * t;
@@ -513,7 +532,19 @@ export class GameEngine {
         len += Math.hypot(q[0] - prev[0], q[1] - prev[1]); lut.push({ x: q[0], y: q[1], d: len }); prev = q;
       }
     }
-    this.zPath = lut; this.zLen = len;
+    this.zPathS = lut; this.zLenS = len;
+    // --- тропка v4+: спираль ~3 витков с краю к центру, конец — точно у деда ---
+    const cx = this.W / 2, cy = this.H / 2, thEnd = 2 * Math.PI * 3, r0 = 245, r1 = 34;
+    const raw: any[] = [];
+    for (let i = 0; i <= 540; i++) {
+      const th = (i / 540) * thEnd, r = r1 + (r0 - r1) * (1 - th / thEnd);
+      raw.push({ x: cx + r * Math.cos(th), y: cy + r * Math.sin(th) });
+    }
+    raw.push({ x: cx, y: cy });   // финальная точка — центр, где стоит Дед Мороз
+    const sp: any[] = []; let len2 = 0; let p2 = raw[0];
+    for (const q of raw) { len2 += Math.hypot(q.x - p2.x, q.y - p2.y); sp.push({ x: q.x, y: q.y, d: len2 }); p2 = q; }
+    this.zPathSp = sp; this.zLenSp = len2;
+    this.zPath = this.zPathS; this.zLen = this.zLenS;   // reset() выберет по simV
   }
   zPos(s: number) {
     const lut = this.zPath; if (!lut.length) return { x: this.W / 2, y: -40 };
@@ -524,24 +555,39 @@ export class GameEngine {
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   }
   zPick() { const r = this.rng(); return r < 0.34 ? "g" : r < 0.64 ? "s" : r < 0.85 ? "t" : "b"; }
+  zNewType(ch: any[]) {
+    let t = this.zPick();
+    // v4+: цепочка не рождается с готовой группой «3 одинаковых подряд» — иначе они выглядят «схлопывающимися сами»
+    if (this.simV >= 4) for (let g = 0; g < 4 && ch.length >= 2 && ch[ch.length - 1].t === t && ch[ch.length - 2].t === t; g++) t = this.zPick();
+    return t;
+  }
+  zShotY() { return this.player.y - (this.simV >= 4 ? 60 : 34); }
   zAimAng() {
-    const dx = this.zAim.x - this.player.x, dy = this.zAim.y - (this.player.y - 34);
+    const dx = this.zAim.x - this.player.x, dy = this.zAim.y - this.zShotY();
     let a = Math.atan2(dy, dx);
-    if (a > -0.12) a = dx >= 0 ? -0.12 : -Math.PI + 0.12;   // вниз не стреляем
+    if (this.simV < 4 && a > -0.12) a = dx >= 0 ? -0.12 : -Math.PI + 0.12;   // старая раскладка: вниз не стреляем
     return a;
   }
   zInit() {
+    const sp = this.simV >= 4;
     const chain: any[] = [];
-    for (let i = 0; i < 14; i++) chain.push({ t: this.zPick(), s: this.zLen * 0.32 - i * 36, seed: this.rng() * 6.28 });
+    const startS = this.zLen * (sp ? 0.55 : 0.32);
+    for (let i = 0; i < 14; i++) chain.push({ t: this.zNewType(chain), s: startS - i * 36, seed: this.rng() * 6.28 });
     this.zc = { chain, projs: [], loaded: null, tFire: 0, stall: 0, pending: null, iptr: 0, pauseT: 0 };
     this.zAim = { x: this.W / 2, y: 300 };
     this.player.x = this.player.tx = this.W / 2;
+    if (sp) this.player.y = this.H / 2;   // Дед Мороз — в центре спирали
   }
   zFire(ang: number) {
     const zc = this.zc; if (!zc || zc.tFire > 0 || !zc.loaded || this.prepT > 0) return;
-    zc.projs.push({ x: this.player.x, y: this.player.y - 34, vx: Math.cos(ang) * 620, vy: Math.sin(ang) * 620, t: zc.loaded });
+    const oy = this.zShotY();
+    zc.projs.push({ x: this.player.x, y: oy, vx: Math.cos(ang) * 620, vy: Math.sin(ang) * 620, t: zc.loaded });
     zc.loaded = null; zc.tFire = 0.3;
-    if (this.rec && !this.REPLAYING && this.rec.inputs.length < 5900) this.rec.inputs.push([this.recT(), -Math.round(Math.abs(ang) * 1000)]);   // выстрел = отрицательное -|ang|*1000
+    if (this.rec && !this.REPLAYING && this.rec.inputs.length < 5900) {
+      // v4: полный круг (угол со знаком), код = -(10000 + (ang+π)*1000); старые версии: -|ang|*1000
+      const code = this.simV >= 4 ? -(10000 + Math.round((ang + Math.PI) * 1000)) : -Math.round(Math.abs(ang) * 1000);
+      this.rec.inputs.push([this.recT(), code]);
+    }
     this.sfx([520, 780], 0.05, "square", 0.1);
   }
   zMatch(i: number) {
@@ -580,15 +626,16 @@ export class GameEngine {
       const ins = this.scripted.data.inputs;
       while (zc.iptr < ins.length && ins[zc.iptr][0] <= this.time) {
         const v = ins[zc.iptr++][1];
-        if (typeof v === "number" && v <= -120 && v >= -3200) this.zFire(v / 1000);
+        if (this.simV >= 4 && typeof v === "number" && v <= -10000 && v >= -16400) this.zFire((-v - 10000) / 1000 - Math.PI);
+        else if (typeof v === "number" && v <= -120 && v >= -3200) this.zFire(v / 1000);
       }
     } else if (zc.pending != null) {
       const a = zc.pending; zc.pending = null; this.zFire(a);
     }
     if (!zc.loaded) zc.loaded = this.zPick();
     zc.tFire = Math.max(0, zc.tFire - dt); zc.stall = Math.max(0, zc.stall - dt);
-    // скорость цепочки: v3+ медленнее (20+4*diff), v2 — историческая (30+8*diff), ради точных реплеев
-    const zs = this.simV >= 3 ? 20 + 4 * this.diff() : 30 + 8 * this.diff();
+    // скорость цепочки по версиям: v4 — спираль и ещё медленнее, v3 — 20+4*diff, v2 — историческая 30+8*diff
+    const zs = this.simV >= 4 ? 14 + 3 * this.diff() : this.simV >= 3 ? 20 + 4 * this.diff() : 30 + 8 * this.diff();
     const v = this.prepT > 0 || zc.stall > 0 ? 0 : zs;
     for (const b of ch) b.s += v * dt;
     for (let i = 1; i < ch.length; i++) {
@@ -597,7 +644,7 @@ export class GameEngine {
     }
     if (this.prepT <= 0 && ch.length < 40 && this.time >= zc.pauseT &&
         (!ch.length || ch[ch.length - 1].s >= gap))
-      ch.push({ t: this.zPick(), s: 0, seed: this.rng() * 6.28 });
+      ch.push({ t: this.zNewType(ch), s: 0, seed: this.rng() * 6.28 });
     // укус: цепочка дошла до деда — откусываем голову, цепочка встаёт на паузу
     let head = 0; while (head < ch.length && ch[head].s >= L - 8) head++;
     if (head > 0) {
@@ -653,11 +700,12 @@ export class GameEngine {
     for (const p of zc.projs) ctx.fillText(GameEngine.ZEMOJI[p.t], p.x, p.y);
     if (!this.REPLAYING) {
       const ang = this.zAimAng();
+      const oy = this.zShotY();
       ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 2; ctx.setLineDash([4, 9]);
-      ctx.beginPath(); ctx.moveTo(this.player.x, this.player.y - 34);
-      ctx.lineTo(this.player.x + Math.cos(ang) * 150, this.player.y - 34 + Math.sin(ang) * 150);
+      ctx.beginPath(); ctx.moveTo(this.player.x, oy);
+      ctx.lineTo(this.player.x + Math.cos(ang) * 150, oy + Math.sin(ang) * 150);
       ctx.stroke(); ctx.setLineDash([]);
-      if (zc.loaded) ctx.fillText(GameEngine.ZEMOJI[zc.loaded], this.player.x, this.player.y - 96);
+      if (zc.loaded) ctx.fillText(GameEngine.ZEMOJI[zc.loaded], this.player.x, this.player.y - (this.simV >= 4 ? 108 : 96));
     }
     // дед Мороз в конце тропки (серый и с падением после укуса)
     ctx.save(); ctx.translate(this.player.x, this.player.y);
