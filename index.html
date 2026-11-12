@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>🎄 Новогодний бегун — Дед Мороз</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1026;overflow:hidden;font-family:"Segoe UI",Arial,sans-serif;-webkit-user-select:none;user-select:none}
+  #wrap{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;background:#0b1026;border-radius:8px;box-shadow:0 0 40px rgba(80,120,255,.25)}
+  .overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(86%,420px);
+    padding:28px 24px;border-radius:18px;text-align:center;color:#fff;z-index:10;
+    background:rgba(10,16,40,.82);border:1px solid rgba(255,255,255,.15);backdrop-filter:blur(6px);
+    box-shadow:0 12px 50px rgba(0,0,0,.6)}
+  .overlay h1{margin:0 0 10px;font-size:clamp(24px,6vw,38px);color:#ffd75e;text-shadow:0 2px 12px rgba(255,200,60,.4)}
+  .overlay p{margin:0 0 14px;font-size:15px;line-height:1.5;color:#cfd8ff}
+  .overlay .small{font-size:12px;color:#8fa0d8;margin-top:12px}
+  button{cursor:pointer;border:0;border-radius:12px;padding:13px 34px;font-size:19px;font-weight:700;color:#3a1a00;
+    background:linear-gradient(180deg,#ffd75e,#ff9d3c);box-shadow:0 4px 18px rgba(255,170,60,.45);transition:transform .08s}
+  button:hover{transform:scale(1.05)}
+  button:active{transform:scale(.97)}
+  .mini{padding:8px 16px;font-size:14px;font-weight:400;color:#cfd8ff;background:rgba(255,255,255,.1);box-shadow:none}
+  .hidden{display:none!important}
+  #sndBtn{position:absolute;right:12px;top:12px;z-index:11}
+  .score-line{font-size:26px;margin:8px 0 2px;color:#fff}
+  .record{font-size:15px;color:#ffd75e;margin-bottom:14px}
+  .bTitle{font-size:16px;font-weight:700;color:#fff;margin:16px 0 6px}
+  .board{max-height:210px;overflow-y:auto;text-align:left;margin-bottom:6px}
+  .bRow{display:flex;gap:10px;padding:5px 10px;border-radius:8px;font-size:15px;color:#dfe7ff}
+  .bRow:nth-child(odd){background:rgba(255,255,255,.05)}
+  .bRow.me{background:rgba(255,215,94,.18);color:#ffd75e;font-weight:700}
+  .bRank{width:24px;color:#8fa0d8;flex:none}
+  .bName{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .bScore{font-weight:700}
+  .bEmpty{color:#8fa0d8;font-size:14px;padding:6px 10px}
+  #saveArea{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:14px}
+  #nameInput{padding:11px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.25);
+    background:rgba(255,255,255,.08);color:#fff;font-size:16px;width:150px;outline:none}
+  #nameInput::placeholder{color:#8fa0d8}
+  #saveBtn{padding:11px 16px;font-size:15px}
+  #saveBtn:disabled{opacity:.5;cursor:default;transform:none}
+  .note{font-size:11px;color:#8fa0d8;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div id="menu" class="overlay">
+    <h1>🎄 Новогодний бегун</h1>
+    <p>Помоги Деду Морозу 🎅 собрать побольше подарков 🎁 и уворачиваться от снежков ❄!<br>
+    Чем дольше играешь — тем быстрее всё летит. Не замерзни!</p>
+    <button id="startBtn">▶ Начать игру</button>
+    <div class="bTitle">🏆 Таблица рекордов</div>
+    <div class="board" id="menuBoard"></div>
+    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза</div>
+  </div>
+
+  <div id="over" class="overlay hidden">
+    <h1>❄️ Игра окончена</h1>
+    <div class="score-line" id="finalScore"></div>
+    <div class="record" id="recordLine"></div>
+    <button id="againBtn">▶ Играть снова</button>
+    <div id="saveArea" class="hidden">
+      <input id="nameInput" maxlength="20" placeholder="Ваше имя" autocomplete="off">
+      <button id="saveBtn">💾 В таблицу</button>
+    </div>
+    <div class="bTitle">🏆 Таблица рекордов</div>
+    <div class="board" id="overBoard"></div>
+    <div class="note" id="boardNote"></div>
+    <div class="small" id="statsLine"></div>
+  </div>
+
+  <button id="sndBtn" class="mini hidden">🔊 Музыка</button>
+</div>
+
+<script>
+"use strict";
+/* ======================= миры и канвас ======================= */
+const W = 480, H = 800;
+const cv = document.getElementById("game");
+const ctx = cv.getContext("2d");
+let scale = 1;
+
+function resize() {
+  const ww = innerWidth, wh = innerHeight;
+  scale = Math.min(ww / W, wh / H);
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  cv.width = Math.round(W * scale * dpr);
+  cv.height = Math.round(H * scale * dpr);
+  cv.style.width = (W * scale) + "px";
+  cv.style.height = (H * scale) + "px";
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+}
+addEventListener("resize", resize); resize();
+
+/* ======================= музыка (WebAudio) ======================= */
+let ac = null, master = null, musicOn = true, loopStartT = 0, schedTimer = null;
+const BPM = 138, BEAT = 60 / BPM;
+// Jingle Bells (припев), события [смещение в тактах, длительность, midi]
+const MELODY = [
+  [0,1,64],[1,1,64],[2,2,64],[4,1,64],[5,1,64],[6,2,64],
+  [8,1,64],[9,1,67],[10,1,60],[11,1,62],[12,4,64],
+  [16,1,65],[17,1,65],[18,2,65],[20,1,65],[21,1,65],[22,2,65],[24,1,65],[25,1,64],[26,1,64],
+  [27,2,64],[29,1,64],[30,1,62],[31,1,62],[32,1,64],[33,4,62],[37,2,60]
+];
+const LOOP_BEATS = 39;
+// бас: корень аккорда на каждый такт (C G C G / C G F C / G F C G ...)
+const BASS = [48,43,48,43,48,43,41,48,43,41,48,43,48,43];
+const midiF = m => 440 * Math.pow(2, (m - 69) / 12);
+
+function tone(t, freq, dur, type, vol, det) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.value = freq; if (det) o.detune.value = det;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function scheduleLoop(t0) {
+  for (const [b, d, m] of MELODY) {
+    const t = t0 + b * BEAT;
+    tone(t, midiF(m), d * BEAT * 0.9, "triangle", 0.24, 0);
+    tone(t, midiF(m + 12), d * BEAT * 0.9, "sine", 0.06, 6); // "блеск"
+  }
+  for (let i = 0; i < LOOP_BEATS; i += 2) {
+    tone(t0 + i * BEAT, midiF(BASS[Math.floor(i / 4) % BASS.length] - 12), BEAT * 1.6, "sine", 0.16, 0);
+  }
+}
+function ensureMusic() {
+  if (!ac || !musicOn) return;
+  const horizon = ac.currentTime + 5;
+  while (loopStartT < horizon) { scheduleLoop(loopStartT); loopStartT += LOOP_BEATS * BEAT; }
+}
+function startMusic() {
+  if (!ac) {
+    ac = new (AudioContext || webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 0.6; master.connect(ac.destination);
+    loopStartT = ac.currentTime + 0.1;
+    schedTimer = setInterval(ensureMusic, 1000);
+  }
+  if (ac.state === "suspended") ac.resume();
+  ensureMusic();
+}
+function sfx(freqs, dur, type, vol) {
+  if (!ac) return;
+  const t = ac.currentTime;
+  freqs.forEach((f, i) => tone(t + i * dur, f, dur * 1.5, type || "square", vol || 0.18, 0));
+}
+function setMusic(on) {
+  musicOn = on;
+  if (master) master.gain.value = on ? 0.6 : 0;
+  document.getElementById("sndBtn").textContent = on ? "🔊 Музыка" : "🔇 Музыка";
+}
+
+/* ======================= игра ======================= */
+const EMOJI_FONT = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
+let state = "menu";           // menu | play | pause | over
+let time = 0, score = 0, giftsGot = 0, lives = 3, shakeT = 0;
+let player, gifts, snow, parts, pops, trees, flakes, tGift, tSnow;
+/* -------- общий рейтинг -------- */
+/* === Конфигурация Supabase (общий рейтинг) — заполнено === */
+const SUPABASE_URL = "https://txysdosoenhgzhjsmffm.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4eXNkb3NvZW5oZ3poanNtZmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0MzQ4MjksImV4cCI6MjExMDAxMDgyOX0.2ecVC9GmvxDlh6Vk9ktsqV40LHHFkjmma5T8utIR99s";
+/* ======================================================================= */
+const ON_NET = /^https?:$/.test(location.protocol);   // игра отдаётся нашим server.js?
+let board = [], mode = "local", savedThisRound = false, myKey = "";
+const SB = !!(SUPABASE_URL && SUPABASE_KEY);
+const sbH = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" };
+
+async function loadBoard() {
+  if (SB) {
+    try {
+      const r = await fetch(SUPABASE_URL + "/rest/v1/scores?select=name,score,date&order=score.desc&limit=20", { headers: sbH });
+      if (r.ok) { board = await r.json(); mode = "supabase"; renderBoards(); return; }
+    } catch (e) { /* уйдём в fallback */ }
+  }
+  if (ON_NET) {
+    try {
+      const r = await fetch("/api/scores");
+      if (r.ok) { board = await r.json(); mode = "server"; renderBoards(); return; }
+    } catch (e) { /* уйдём в fallback */ }
+  }
+  mode = "local";
+  try { board = JSON.parse(localStorage.getItem("xmasTop") || "[]"); } catch (e) { board = []; }
+  renderBoards();
+}
+function sortBoard() { board.sort((a, b) => b.score - a.score); }
+function saveLocal() { localStorage.setItem("xmasTop", JSON.stringify(board.slice(0, 50))); }
+async function submitScore(rawName) {
+  if (savedThisRound || score <= 0) return;
+  const name = (rawName || "").replace(/[<>&"'\\]/g, "").trim().slice(0, 24) || "Аноним";
+  localStorage.setItem("xmasName", name);
+  const item = { name, score, date: new Date().toISOString().slice(0, 10) };
+  myKey = name + "|" + score;
+  if (mode === "supabase") {
+    try {
+      const r = await fetch(SUPABASE_URL + "/rest/v1/scores", {
+        method: "POST", headers: Object.assign({ "prefer": "return=minimal" }, sbH), body: JSON.stringify([item]) });
+      if (r.ok || r.status === 201) { savedThisRound = true; markSaved(); await loadBoard(); return; }
+    } catch (e) { /* fallback ниже */ }
+  } else if (mode === "server") {
+    try {
+      const r = await fetch("/api/scores", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
+      if (r.ok) { board = await r.json(); savedThisRound = true; markSaved(); renderBoards(); return; }
+    } catch (e) { /* fallback ниже */ }
+  }
+  board.push(item); sortBoard(); board = board.slice(0, 50); saveLocal();
+  savedThisRound = true; markSaved(); renderBoards();
+}
+function markSaved() {
+  const b = document.getElementById("saveBtn");
+  b.disabled = true; b.textContent = "✓ Сохранено";
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function boardHTML() {
+  if (!board.length) return '<div class="bEmpty">Пока пусто — стань первым! 🎄</div>';
+  let shownMy = false;
+  return board.slice(0, 10).map((e, i) => {
+    const k = e.name + "|" + e.score, me = k === myKey && !shownMy; if (me) shownMy = true;
+    return `<div class="bRow${me ? " me" : ""}"><span class="bRank">${i + 1}.</span><span class="bName">${esc(e.name)}</span><span class="bScore">${e.score}</span></div>`;
+  }).join("");
+}
+function renderBoards() {
+  const html = boardHTML();
+  document.getElementById("menuBoard").innerHTML = html;
+  document.getElementById("overBoard").innerHTML = html;
+  document.getElementById("boardNote").textContent =
+    mode === "supabase" ? "🌍 Общая таблица для всех игроков (Supabase)"
+    : mode === "server" ? "🌍 Общая таблица для всех, кто играет с этого сервера"
+    : "⚠ Локальная таблица. Для общей: включите Supabase или node server.js";
+}
+
+function makeBack() {
+  trees = []; flakes = [];
+  for (let i = 0; i < 9; i++) trees.push({ x: Math.random() * W, y: Math.random() * H, s: 0.5 + Math.random() * 0.7 });
+  for (let i = 0; i < 70; i++) flakes.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.5, v: 25 + Math.random() * 55, p: Math.random() * 6.28 });
+}
+function reset() {
+  time = 0; score = 0; giftsGot = 0; lives = 3; shakeT = 0;
+  player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
+  gifts = []; snow = []; parts = []; pops = [];
+  tGift = 0.6; tSnow = 1.4;
+  makeBack();
+}
+makeBack(); player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
+
+const diff = () => Math.min(3, 1 + time / 50);        // сложность растёт со временем
+const fallSpeed = () => 240 * diff();
+
+function spawnGift() {
+  const bonus = Math.random() < 0.07;
+  gifts.push({ x: 30 + Math.random() * (W - 60), y: -40, r: 26, rot: Math.random() * 0.5 - 0.25,
+    vy: fallSpeed() * (0.55 + Math.random() * 0.2), bonus, p: Math.random() * 6.28 });
+}
+function spawnSnow() {
+  snow.push({ x: 25 + Math.random() * (W - 50), y: -30, r: 15 + Math.random() * 9,
+    vy: fallSpeed() * (0.85 + Math.random() * 0.4), amp: 12 + 20 * Math.random() * diff(), p: Math.random() * 6.28, sp: 1.5 + Math.random() * 2 });
+}
+function burst(x, y, colors) {
+  for (let i = 0; i < 14; i++) {
+    const a = Math.random() * 6.28, v = 60 + Math.random() * 220;
+    parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.6 + Math.random() * 0.4, c: colors[i % colors.length], r: 2 + Math.random() * 3 });
+  }
+}
+
+/* ---------- ввод ---------- */
+let keys = {};
+addEventListener("keydown", e => {
+  if (e.target && e.target.tagName === "INPUT") return;   // не мешать вводу имени
+  if (["ArrowLeft", "ArrowRight", "a", "d", "A", "D", " "].includes(e.key)) e.preventDefault();
+  keys[e.key.toLowerCase()] = true;
+  if (e.key.toLowerCase() === "p") {
+    if (state === "play") state = "pause";
+    else if (state === "pause") state = "play";
+  }
+});
+addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+function pointerX(e) {
+  const r = cv.getBoundingClientRect();
+  return ((e.touches ? e.touches[0].clientX : e.clientX) - r.left) / scale;
+}
+cv.addEventListener("pointerdown", e => { if (state === "play") player.tx = pointerX(e); });
+cv.addEventListener("pointermove", e => { if (state === "play" && (e.buttons || e.pointerType === "touch")) player.tx = pointerX(e); });
+
+/* ---------- обновление ---------- */
+function update(dt) {
+  // фон живёт всегда
+  for (const f of flakes) {
+    f.y += f.v * dt * (state === "play" ? diff() * 0.6 + 0.4 : 0.5);
+    f.x += Math.sin(time * 0.7 + f.p) * 12 * dt;
+    if (f.y > H + 5) { f.y = -5; f.x = Math.random() * W; }
+  }
+  for (const t of trees) {
+    t.y += fallSpeedOrIdle() * 0.22 * t.s * dt;
+    if (t.y > H + 60) { t.y = -70; t.x = Math.random() * W; t.s = 0.5 + Math.random() * 0.7; }
+  }
+  if (state !== "play") return;
+
+  time += dt;
+  player.inv = Math.max(0, player.inv - dt);
+  shakeT = Math.max(0, shakeT - dt);
+
+  // движение
+  const kl = keys["arrowleft"] || keys["a"], kr = keys["arrowright"] || keys["d"];
+  if (kl || kr) player.tx += ((kr ? 1 : 0) - (kl ? 1 : 0)) * 560 * diff() * dt;
+  player.tx = Math.max(40, Math.min(W - 40, player.tx));
+  player.x += (player.tx - player.x) * Math.min(1, dt * 14);
+
+  // спавн — чаще со временем
+  tGift -= dt; if (tGift <= 0) { spawnGift(); tGift = Math.max(0.28, 0.8 - time / 150); }
+  tSnow -= dt; if (tSnow <= 0) { spawnSnow(); if (diff() > 1.8 && Math.random() < 0.35) spawnSnow(); tSnow = Math.max(0.16, 0.55 - time / 240); }
+
+  // подарки
+  for (let i = gifts.length - 1; i >= 0; i--) {
+    const g = gifts[i]; g.y += g.vy * dt; g.p += dt * 2;
+    g.x += Math.sin(g.p) * 20 * dt;
+    const d = Math.hypot(g.x - player.x, g.y - player.y);
+    if (d < g.r + player.r * 0.75) {
+      const val = g.bonus ? 50 : 10;
+      score += val; giftsGot++;
+      pops.push({ x: g.x, y: g.y, t: 0, txt: "+" + val, c: g.bonus ? "#ffd75e" : "#9dffb0" });
+      burst(g.x, g.y, g.bonus ? ["#ffd75e", "#fff3b0", "#ffb347"] : ["#ff5d5d", "#ffd75e", "#7ec8ff"]);
+      sfx(g.bonus ? [1046, 1318, 1568, 2093] : [880, 1318], 0.07, "square", 0.14);
+      gifts.splice(i, 1); continue;
+    }
+    if (g.y > H + 50) gifts.splice(i, 1);
+  }
+  // снежки
+  for (let i = snow.length - 1; i >= 0; i--) {
+    const s = snow[i]; s.y += s.vy * dt; s.p += dt * s.sp;
+    const d = Math.hypot(s.x + Math.sin(s.p) * s.amp - player.x, s.y - player.y);
+    if (player.inv <= 0 && d < s.r + player.r * 0.62) {
+      lives--; snow.splice(i, 1); shakeT = 0.35;
+      burst(player.x, player.y - 10, ["#ffffff", "#bfe4ff", "#7ec8ff"]);
+      sfx([180, 120, 90], 0.09, "sawtooth", 0.2);
+      if (lives <= 0) gameOver();
+      continue;
+    }
+    if (s.y > H + 40) snow.splice(i, 1);
+  }
+  // частицы и попапы
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 500 * dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; pops[i].y -= 45 * dt; if (pops[i].t > 1) pops.splice(i, 1); }
+}
+function fallSpeedOrIdle() { return state === "play" ? fallSpeed() : 140; }
+
+function gameOver() {
+  state = "over";
+  sfx([660, 550, 440, 330, 262], 0.16, "triangle", 0.2);
+  const prevHigh = +(localStorage.getItem("xmasHigh") || 0);
+  const rec = score > prevHigh;
+  if (rec) localStorage.setItem("xmasHigh", score);
+  document.getElementById("finalScore").textContent = "Счёт: " + score;
+  document.getElementById("recordLine").textContent = rec ? "🎉 Личный рекорд!" : "🏆 Ваш рекорд: " + prevHigh;
+  document.getElementById("statsLine").textContent = "Подарков собрано: " + giftsGot + " · Время: " + Math.floor(time) + " с";
+  // окно добавления имени в общую таблицу
+  savedThisRound = false; myKey = "";
+  const saveArea = document.getElementById("saveArea");
+  if (score > 0) {
+    saveArea.classList.remove("hidden");
+    const btn = document.getElementById("saveBtn");
+    btn.disabled = false; btn.textContent = "💾 В таблицу";
+    const inp = document.getElementById("nameInput");
+    inp.value = localStorage.getItem("xmasName") || "";
+    inp.onkeydown = e => { if (e.key === "Enter") submitScore(inp.value); };
+  } else saveArea.classList.add("hidden");
+  document.getElementById("over").classList.remove("hidden");
+  loadBoard();
+}
+
+/* ---------- отрисовка ---------- */
+function drawTree(t) {
+  const s = t.s, x = t.x, y = t.y;
+  ctx.fillStyle = "rgba(20,45,40,.55)";
+  for (let i = 0; i < 3; i++) {
+    const w = (34 - i * 8) * s, h = 22 * s, oy = y - i * 15 * s;
+    ctx.beginPath(); ctx.moveTo(x, oy - h); ctx.lineTo(x - w, oy + h * 0.4); ctx.lineTo(x + w, oy + h * 0.4); ctx.closePath(); ctx.fill();
+  }
+}
+function draw() {
+  ctx.save();
+  if (shakeT > 0) ctx.translate((Math.random() - .5) * 10 * shakeT, (Math.random() - .5) * 10 * shakeT);
+
+  // небо
+  const gr = ctx.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, "#0b1026"); gr.addColorStop(0.6, "#16214e"); gr.addColorStop(1, "#1f3b73");
+  ctx.fillStyle = gr; ctx.fillRect(-20, -20, W + 40, H + 40);
+  // луна
+  ctx.fillStyle = "#f5f0c8"; ctx.beginPath(); ctx.arc(W - 70, 80, 30, 0, 6.29); ctx.fill();
+  ctx.fillStyle = "rgba(245,240,200,.12)"; ctx.beginPath(); ctx.arc(W - 70, 80, 48, 0, 6.29); ctx.fill();
+
+  for (const t of trees) drawTree(t);
+  // снег
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  for (const f of flakes) { ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 6.29); ctx.fill(); }
+
+  if (state !== "menu") {
+    // подарки
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const g of gifts) {
+      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
+      ctx.font = (g.bonus ? 42 : 44) + "px " + EMOJI_FONT;
+      ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
+    }
+    // снежки
+    for (const s of snow) {
+      const x = s.x + Math.sin(s.p) * s.amp;
+      const rg = ctx.createRadialGradient(x - s.r * .3, s.y - s.r * .3, s.r * .2, x, s.y, s.r);
+      rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#9db8d8");
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, 6.29); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
+    }
+    // частицы
+    for (const p of parts) {
+      ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.c;
+      ctx.fillRect(p.x - p.r, p.y - p.r, p.r * 2, p.r * 2); ctx.globalAlpha = 1;
+    }
+    // попапы очков
+    for (const p of pops) {
+      ctx.globalAlpha = 1 - p.t; ctx.fillStyle = p.c; ctx.font = "bold 26px " + EMOJI_FONT;
+      ctx.fillText(p.txt, p.x, p.y); ctx.globalAlpha = 1;
+    }
+    // дед мороз
+    const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
+    ctx.globalAlpha = blink ? 0.3 : 1;
+    ctx.font = 72 + "px " + EMOJI_FONT;
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate((player.tx - player.x) * 0.002);
+    ctx.fillText("🎅", 0, 0); ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  // HUD
+  if (state === "play" || state === "pause" || state === "over") {
+    ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 24px Arial";
+    ctx.fillText("🎁 " + score, 16, 34);
+    ctx.font = "15px Arial"; ctx.fillStyle = "#9fb4ff";
+    ctx.fillText("ур. " + diff().toFixed(1) + " · " + Math.floor(time) + "с", 18, 58);
+    ctx.textAlign = "right"; ctx.font = "24px " + EMOJI_FONT;
+    let h = ""; for (let i = 0; i < 3; i++) h += i < lives ? "❤️ " : "🖤 ";
+    ctx.fillText(h, W - 14, 34);
+  }
+  if (state === "pause") {
+    ctx.fillStyle = "rgba(5,10,30,.6)"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 40px Arial";
+    ctx.fillText("⏸ Пауза", W / 2, H / 2 - 10);
+    ctx.font = "18px Arial"; ctx.fillStyle = "#9fb4ff";
+    ctx.fillText("нажми P, чтобы продолжить", W / 2, H / 2 + 28);
+  }
+  ctx.restore();
+}
+
+/* ---------- цикл ---------- */
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- кнопки ---------- */
+function startGame() {
+  reset(); state = "play";
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("over").classList.add("hidden");
+  document.getElementById("saveArea").classList.add("hidden");
+  document.getElementById("sndBtn").classList.remove("hidden");
+  startMusic();
+}
+document.getElementById("startBtn").onclick = startGame;
+document.getElementById("againBtn").onclick = startGame;
+document.getElementById("saveBtn").onclick = () => submitScore(document.getElementById("nameInput").value);
+document.getElementById("sndBtn").onclick = () => setMusic(!musicOn);
+addEventListener("visibilitychange", () => { if (document.hidden && state === "play") state = "pause"; });
+loadBoard(); // таблица рекордов при запуске
+</script>
+</body>
+</html>
