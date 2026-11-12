@@ -17,7 +17,7 @@ const H = {
 };
 const root = path.join(__dirname, "..");
 const SKIP_DIRS = new Set(["node_modules", "dist", ".angular", ".vscode"]);
-const MAX_SIZE = 900 * 1024;
+const MAX_SIZE = 5 * 1024 * 1024;   // mp3-ассеты источника (ранее 900 КБ — из-за чего трэки пропускались)
 
 async function gh(url, init = {}) {
   const r = await fetch("https://api.github.com" + url, { ...init, headers: H });
