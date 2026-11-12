@@ -70,7 +70,7 @@ export class SupabaseService {
   }
 
   boardNote(): string {
-    return this.mode === "supabase" ? "🌍 Общая таблица для всех игроков (Supabase)"
+    return this.mode === "supabase" ? "🌍 Общая таблица для всех игроков"
       : this.mode === "server" ? "🌍 Общая таблица для всех, кто играет с этого сервера"
       : "⚠ Локальная таблица. Для общей: включите Supabase или node server.js";
   }

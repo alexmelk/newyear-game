@@ -90,7 +90,7 @@ import { VERSION, SUPABASE_URL } from "../core/config";
 
     <!-- ================= DEV-ПАНЕЛЬ (F2, пароль администратора) ================= -->
     <div id="dev" *ngIf="engine && engine.debug.on">
-      <div id="devHead">🛠 Режим разработчика (F2, пароль) <button (click)="engine?.setDebug(false)">✕</button></div>
+      <div id="devHead">🛠 Режим разработчика (F2) <button (click)="engine?.setDebug(false)">✕</button></div>
       <div class="devBtns">
         <button [class.on]="engine.debug.inv" (click)="engine.debugToggle('inv')">🛡 неуязв. (I)</button>
         <button [class.on]="engine.debug.inflives" (click)="engine.debugToggle('inflives')">∞ жизни</button>
