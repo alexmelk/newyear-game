@@ -753,11 +753,20 @@ function draw() {
     if (mode3d) {
       draw3dItems();
     } else {
-      // подарки
+      // подарки — яркие, со свечением, чтобы не терялись на ночном фоне
       for (const g of gifts) {
-        ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
-        ctx.font = (g.bonus ? 42 : 44) + "px " + EMOJI_FONT;
-        ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
+        ctx.save(); ctx.translate(g.x, g.y);
+        const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 46);
+        if (g.bonus) { glow.addColorStop(0, "rgba(255,236,130,.95)"); glow.addColorStop(.55, "rgba(255,210,70,.4)"); glow.addColorStop(1, "rgba(255,215,80,0)"); }
+        else { glow.addColorStop(0, "rgba(255,130,110,.8)"); glow.addColorStop(.55, "rgba(255,100,90,.3)"); glow.addColorStop(1, "rgba(255,90,80,0)"); }
+        ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 46, 0, 6.29); ctx.fill();
+        ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
+        ctx.shadowColor = g.bonus ? "#ffe98a" : "#ff7a66";
+        ctx.shadowBlur = 18;
+        ctx.font = (g.bonus ? 44 : 46) + "px " + EMOJI_FONT;
+        ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
+        ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0); // двойная отрисовка — saturation свечения
+        ctx.restore();
       }
       // снежки — крупные, с синей каймой: сразу отличаются от фоновых точек
       for (const s of snow) {
