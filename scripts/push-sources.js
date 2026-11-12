@@ -48,6 +48,10 @@ function collect(relDir) {
   const ref = await gh(`/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`);
   if (ref.status !== 200) { console.log("ref FAIL", ref.text.slice(0, 200)); process.exit(1); }
   const parent = ref.json.object.sha;
+  // base_tree ОБЯЗАТЕЛЕН: иначе новый tree заменит всё содержимое репо
+  const parentCommit = await gh(`/repos/${OWNER}/${REPO}/git/commits/${parent}`);
+  const baseTree = parentCommit.json.tree && parentCommit.json.tree.sha;
+  if (!baseTree) { console.log("base_tree FAIL", parentCommit.text.slice(0, 200)); process.exit(1); }
 
   const tree = [];
   for (const rel of paths) {
@@ -64,7 +68,7 @@ function collect(relDir) {
   }
   console.log("\nблобов: " + tree.length);
 
-  const tr = await gh(`/repos/${OWNER}/${REPO}/git/trees`, { method: "POST", body: JSON.stringify({ tree }) });
+  const tr = await gh(`/repos/${OWNER}/${REPO}/git/trees`, { method: "POST", body: JSON.stringify({ base_tree: baseTree, tree }) });
   if (tr.status !== 201) { console.log("tree FAIL", tr.text.slice(0, 300)); process.exit(1); }
   const cm = await gh(`/repos/${OWNER}/${REPO}/git/commits`, {
     method: "POST",
