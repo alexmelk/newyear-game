@@ -548,12 +548,15 @@ export class GameEngine {
     const py = HOR + KY / Z_PL - 46;
     ctx.fillStyle = "rgba(0,0,0,.22)";
     ctx.beginPath(); ctx.ellipse(W / 2, py + 62, 64, 15, 0, 0, 6.29); ctx.fill();
-    const blink = this.player.inv > 0 && Math.floor(this.player.inv * 10) % 2 === 0;
-    ctx.globalAlpha = blink ? .45 : 1;
-    ctx.save(); ctx.translate(W / 2, py); ctx.rotate((this.lane - this.laneF) * .35);
+    ctx.save(); ctx.translate(W / 2, py);
+    let rot = (this.lane - this.laneF) * .35;
+    if (this.player.inv > 0) {   // после попадания — падает на бок и постепенно встаёт
+      const fall = this.player.inv / 1.6;
+      rot += (rot >= 0 ? 1 : -1) * 1.4 * fall * fall;
+    }
+    ctx.rotate(rot);
     this.drawSanta(1.6);
     ctx.restore();
-    ctx.globalAlpha = 1;
   }
 
   draw() {
@@ -599,13 +602,16 @@ export class GameEngine {
           ctx.fillStyle = "rgba(255,255,255,.35)";
           ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
         }
-        // дед мороз
-        const blink = this.player.inv > 0 && Math.floor(this.player.inv * 10) % 2 === 0;
-        ctx.globalAlpha = blink ? 0.45 : 1;
-        ctx.save(); ctx.translate(this.player.x, this.player.y); ctx.rotate((this.player.tx - this.player.x) * 0.002);
+        // дед мороз: alpha всегда 1; после попадания — «падает» на бок и встаёт
+        ctx.save(); ctx.translate(this.player.x, this.player.y);
+        let rot = (this.player.tx - this.player.x) * 0.002;
+        if (this.player.inv > 0) {
+          const fall = (this.player.inv / 1.6);
+          rot += (rot >= 0 ? 1 : -1) * 1.4 * fall * fall;
+        }
+        ctx.rotate(rot);
         this.drawSanta(0.85);
         ctx.restore();
-        ctx.globalAlpha = 1;
       }
       for (const p of this.parts) {
         ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.c;
