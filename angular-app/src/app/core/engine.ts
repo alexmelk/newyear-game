@@ -468,13 +468,13 @@ export class GameEngine {
     }
   }
   drawSanta(s: number) {
-    // Эмодзи рисуем РАЗМЕРОМ ШРИФТА, без ctx.scale/rotate/filter/globalAlpha:
-    // на некоторых Windows-браузерах цветные эмодзи в canvas сереют именно
-    // при дополнительных трансформациях вокруг текста.
+    // игрок — эмодзи Деда Мороза с полным набором эффектов (по просьбе пользователя)
     const ctx = this.ctx;
-    ctx.font = Math.round(80 * s) + "px " + this.EMOJI_FONT;
+    ctx.save(); ctx.scale(s, s);
+    ctx.font = "80px " + this.EMOJI_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText("🎅", 0, 0);
+    ctx.restore();
   }
   draw3dGround() {
     const ctx = this.ctx, W = this.W, H = this.H;
@@ -548,13 +548,12 @@ export class GameEngine {
     const py = HOR + KY / Z_PL - 46;
     ctx.fillStyle = "rgba(0,0,0,.22)";
     ctx.beginPath(); ctx.ellipse(W / 2, py + 62, 64, 15, 0, 0, 6.29); ctx.fill();
-    ctx.save(); ctx.translate(W / 2, py);
+    const blink = this.player.inv > 0 && Math.floor(this.player.inv * 10) % 2 === 0;
+    ctx.globalAlpha = blink ? .45 : 1;
+    ctx.save(); ctx.translate(W / 2, py); ctx.rotate((this.lane - this.laneF) * .35);
     this.drawSanta(1.6);
-    if (this.player.inv > 0) {
-      ctx.strokeStyle = "rgba(126,200,255,.95)"; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(0, -4, 78 + Math.sin(this.time * 12) * 6, 0, 6.29); ctx.stroke();
-    }
     ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   draw() {
@@ -600,14 +599,13 @@ export class GameEngine {
           ctx.fillStyle = "rgba(255,255,255,.35)";
           ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
         }
-        // дед мороз: чистый fillText, без поворотов/альф — иначе эмодзи сереет на Windows
-        ctx.save(); ctx.translate(this.player.x, this.player.y);
+        // дед мороз
+        const blink = this.player.inv > 0 && Math.floor(this.player.inv * 10) % 2 === 0;
+        ctx.globalAlpha = blink ? 0.45 : 1;
+        ctx.save(); ctx.translate(this.player.x, this.player.y); ctx.rotate((this.player.tx - this.player.x) * 0.002);
         this.drawSanta(0.85);
-        if (this.player.inv > 0) {   // признак неуязвимости — пульсирующее кольцо
-          ctx.strokeStyle = "rgba(126,200,255,.95)"; ctx.lineWidth = 3;
-          ctx.beginPath(); ctx.arc(0, -4, 44 + Math.sin(this.time * 12) * 4, 0, 6.29); ctx.stroke();
-        }
         ctx.restore();
+        ctx.globalAlpha = 1;
       }
       for (const p of this.parts) {
         ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.c;
