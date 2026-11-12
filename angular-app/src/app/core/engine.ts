@@ -247,10 +247,10 @@ export class GameEngine {
     this.tGift = 0.6; this.tSnow = 1.4;
     this.mode3d = this.zuma = false; this.wasZone = "2d"; this.zc = null;
     this.lane = this.laneF = 0; this.prepT = 0; this.zoff = 0;
-    this.simV = this.REPLAYING && this.scripted ? ((this.scripted.data.v | 0) >= 2 ? 2 : 1) : 2;
+    this.simV = this.REPLAYING && this.scripted ? Math.min(3, Math.max(1, this.scripted.data.v | 0) || 1) : 3;
     this.seed0 = (this.round ? this.round.seed : Math.random() * 4294967296) >>> 0;
     this.rng = this.mulberry32(this.seed0);
-    if (!this.REPLAYING) this.rec = { v: 2, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
+    if (!this.REPLAYING) this.rec = { v: 3, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
     this.makeBack();
   }
 
@@ -587,7 +587,9 @@ export class GameEngine {
     }
     if (!zc.loaded) zc.loaded = this.zPick();
     zc.tFire = Math.max(0, zc.tFire - dt); zc.stall = Math.max(0, zc.stall - dt);
-    const v = this.prepT > 0 || zc.stall > 0 ? 0 : 30 + 8 * this.diff();
+    // скорость цепочки: v3+ медленнее (20+4*diff), v2 — историческая (30+8*diff), ради точных реплеев
+    const zs = this.simV >= 3 ? 20 + 4 * this.diff() : 30 + 8 * this.diff();
+    const v = this.prepT > 0 || zc.stall > 0 ? 0 : zs;
     for (const b of ch) b.s += v * dt;
     for (let i = 1; i < ch.length; i++) {
       if (ch[i].s > ch[i - 1].s - gap) ch[i].s = ch[i - 1].s - gap;
