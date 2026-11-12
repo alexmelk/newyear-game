@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🛠 Модерация — Новогодний бегун</title>
+<style>
+  body{margin:0;padding:20px;background:#0b1026;color:#dfe7ff;font-family:"Segoe UI",Arial,sans-serif}
+  h1{font-size:22px;color:#ffd75e;margin:0 0 14px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  input{padding:9px 11px;border-radius:9px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:15px;width:210px;outline:none}
+  button{cursor:pointer;border:0;border-radius:9px;padding:8px 14px;font-size:14px;font-weight:600;color:#3a1a00;background:linear-gradient(180deg,#ffd75e,#ff9d3c)}
+  button.sec{color:#cfd8ff;background:rgba(255,255,255,.12);font-weight:400}
+  #status{font-size:13px;color:#8fa0d8}
+  table{border-collapse:collapse;width:100%;max-width:980px;font-size:14px}
+  th{color:#8fa0d8;text-align:left;font-weight:600;padding:6px 8px;border-bottom:1px solid #2a3a6a}
+  td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:middle}
+  tr:nth-child(odd) td{background:rgba(255,255,255,.03)}
+  tr.hidden td{opacity:.45}
+  .sc{font-weight:700;color:#ffd75e}
+  .badge{font-size:11px;padding:2px 7px;border-radius:8px;background:rgba(255,80,80,.25);color:#ff9d9d;margin-left:4px}
+  .badge.ok{background:rgba(80,255,120,.18);color:#9dffb0}
+  .acts button{margin-right:4px;padding:4px 9px;font-size:12px}
+  .note{font-size:12px;color:#8fa0d8;margin-top:16px;max-width:900px;line-height:1.5}
+  a{color:#7ec8ff}
+</style>
+</head>
+<body>
+<h1>🛠 Модерация рекордов · 🎄 Новогодний бегун</h1>
+<div class="bar">
+  <input id="pass" type="password" placeholder="Пароль администратора">
+  <button id="reload">🔄 Обновить</button>
+  <a href="index.html">⬅ к игре</a>
+  <span id="status"></span>
+</div>
+<table>
+  <thead><tr><th>Дата</th><th>Имя</th><th>Очки</th><th>Реплей</th><th>Статус</th><th>Действия</th></tr></thead>
+  <tbody id="rows"><tr><td colspan="6" style="color:#8fa0d8">— нужно войти —</td></tr></tbody>
+</table>
+<div class="note">
+  ▶ — открыть реплей в игре (топ-3 тоже видят эту кнопку на общем борде).<br>
+  ⚠ «подозрительный» — аномальная плотность очков (&gt;35/сек); «✓ проверить» снимает флаг, если вручную всё ок.<br>
+  🚫 Скрытые записи не попадают в общий борд, но остаются в базе с реплеем. ✖ — полное удаление.<br>
+  Любая запись в борде уже прошла серверную проверку: честный seed раунда, сумма событий = очки,
+  3 попадания, время ≤ реальному с момента старта раунда, раунд использован один раз.
+</div>
+<script>
+"use strict";
+const SUPABASE_URL = "https://txysdosoenhgzhjsmffm.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4eXNkb3NvZW5oZ3poanNtZmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0MzQ4MjksImV4cCI6MjExMDAxMDgyOX0.2ecVC9GmvxDlh6Vk9ktsqV40LHHFkjmma5T8utIR99s";
+const passEl = document.getElementById("pass");
+const statusEl = document.getElementById("status");
+const rowsEl = document.getElementById("rows");
+passEl.value = sessionStorage.getItem("xmasAdminPass") || "";
+
+async function call(action, id) {
+  const r = await fetch(SUPABASE_URL + "/functions/v1/admin", {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY,
+      "Content-Type": "application/json", "x-admin-pass": passEl.value },
+    body: JSON.stringify({ action, id }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((j && j.error) || "http " + r.status);
+  return j;
+}
+function setStatus(t, err) {
+  statusEl.textContent = t;
+  statusEl.style.color = err ? "#ff9d9d" : "#8fa0d8";
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtDate = iso => { try { return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
+
+async function refresh() {
+  sessionStorage.setItem("xmasAdminPass", passEl.value);
+  if (!passEl.value) { setStatus("Введите пароль"); return; }
+  setStatus("Загружаю…");
+  try {
+    const rows = await call("list");
+    setStatus("Записей: " + rows.length);
+    rowsEl.innerHTML = rows.map(r => `
+      <tr class="${r.hidden ? "hidden" : ""}">
+        <td>${fmtDate(r.created_at)}</td>
+        <td>${esc(r.name)}</td>
+        <td class="sc">${r.score}</td>
+        <td>${r.replay_bytes ? Math.round(r.replay_bytes / 1024) + "KB" : "—"}</td>
+        <td>${r.suspicious ? '<span class="badge">⚠ подозр.</span>' : ""}${r.hidden ? '<span class="badge">🚫 скрыт</span>' : '<span class="badge ok">в борде</span>'}</td>
+        <td class="acts">
+          ${r.replay_bytes ? `<button class="sec" data-a="view" data-id="${r.id}">▶</button>` : ""}
+          <button class="sec" data-a="${r.hidden ? "show" : "hide"}" data-id="${r.id}">${r.hidden ? "👁" : "🚫"}</button>
+          ${r.suspicious ? `<button class="sec" data-a="verify" data-id="${r.id}">✓</button>` : ""}
+          <button class="sec" data-a="del" data-id="${r.id}">✖</button>
+        </td>
+      </tr>`).join("") || '<tr><td colspan="6" style="color:#8fa0d8">пусто</td></tr>';
+  } catch (e) {
+    setStatus("Ошибка: " + e.message, true);
+    if (e.message === "wrong password") rowsEl.innerHTML = '<tr><td colspan="6" style="color:#ff9d9d">неверный пароль</td></tr>';
+  }
+}
+rowsEl.addEventListener("click", async e => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const a = b.dataset.a, id = b.dataset.id;
+  try {
+    if (a === "view") { window.open("index.html?replay=" + encodeURIComponent(id), "_blank"); return; }
+    if (a === "del" && !confirm("Удалить запись навсегда?")) return;
+    await call(a === "del" ? "delete" : a, id);
+    refresh();
+  } catch (err) { setStatus("Ошибка: " + err.message, true); }
+});
+document.getElementById("reload").onclick = refresh;
+passEl.addEventListener("keydown", e => { if (e.key === "Enter") refresh(); });
+if (passEl.value) refresh();
+</script>
+</body>
+</html>
