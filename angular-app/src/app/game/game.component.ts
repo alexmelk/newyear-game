@@ -98,7 +98,7 @@ import { VERSION, SUPABASE_URL } from "../core/config";
         <button [class.on]="engine.debug.inflives" (click)="engine.debugToggle('inflives')">∞ жизни</button>
         <button [class.on]="engine.debug.slow" (click)="engine.debugToggle('slow')">🐢 слоу-мо (K)</button>
         <button [class.on]="engine.debug.boxes" (click)="engine.debugToggle('boxes')">☐ хитбоксы (H)</button>
-        <button [class.on]="engine.debug.force3d !== 'auto'" (click)="engine.cycleForce3d()">🌀 3D: {{ engine.debug.force3d }} (T)</button>
+        <button [class.on]="engine.debug.force3d !== 'auto'" (click)="engine.cycleForce3d()">🎮 зона: {{ engine.debug.force3d === 'on' ? '3D' : engine.debug.force3d === 'off' ? '2D' : engine.debug.force3d }} (T)</button>
         <button (click)="engine.devJump()">⏩ +30с (J)</button>
         <button (click)="engine.devSpawnGift()">🎁 спавн (G)</button>
         <button (click)="engine.devSpawnSnow()">❄ спавн (N)</button>

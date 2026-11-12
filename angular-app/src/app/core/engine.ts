@@ -63,7 +63,7 @@ export class GameEngine {
   // ---- dev ----
   debug = {
     on: false, inv: false, inflives: false, slow: false, boxes: false,
-    force3d: "auto", fps: 0, log: [] as string[],
+    force3d: "auto", fps: 0, log: [] as string[],   // auto | on (3D) | off (2D) | zuma — форс зоны в дев-режиме
   };
   devInfo = "";
 
@@ -92,8 +92,8 @@ export class GameEngine {
       if (k2 === "k") { d.slow = !d.slow; this.dlog("слоу-мо = " + d.slow); }
       if (k2 === "h") { d.boxes = !d.boxes; }
       if (k2 === "t") this.cycleForce3d();
-      if (k2 === "g") { this.mode3d ? this.spawn3dGift() : this.spawnGift(); }
-      if (k2 === "n") { this.mode3d ? this.spawn3dSnow() : this.spawnSnow(); }
+      if (k2 === "g") this.devSpawnGift();
+      if (k2 === "n") this.devSpawnSnow();
       if (k2 === "x") { this.snow = []; this.dlog("снежки убраны"); }
     }
     if (e.key.toLowerCase() === "p") {
@@ -378,12 +378,18 @@ export class GameEngine {
   }
   cycleForce3d() {
     const d = this.debug;
-    d.force3d = d.force3d === "auto" ? "on" : d.force3d === "on" ? "off" : "auto";
-    this.dlog("force3d = " + d.force3d);
+    d.force3d = d.force3d === "auto" ? "on" : d.force3d === "on" ? "off" : d.force3d === "off" ? "zuma" : "auto";
+    this.dlog("зона: " + d.force3d);
   }
   devJump() { this.time += 30; this.dlog("time → " + Math.floor(this.time) + "с"); }
-  devSpawnGift() { this.mode3d ? this.spawn3dGift() : this.spawnGift(); this.dlog("+подарок"); }
-  devSpawnSnow() { this.mode3d ? this.spawn3dSnow() : this.spawnSnow(); this.dlog("+снежок"); }
+  devSpawnGift() {
+    if (this.zuma && this.zc) { this.zc.chain.push({ t: "g", s: 0, seed: 0 }); this.dlog("+шарик в цепочку"); return; }
+    this.mode3d ? this.spawn3dGift() : this.spawnGift(); this.dlog("+подарок");
+  }
+  devSpawnSnow() {
+    if (this.zuma && this.zc) { this.zc.chain.push({ t: this.zPick(), s: 0, seed: 0 }); this.dlog("+шарик в цепочку"); return; }
+    this.mode3d ? this.spawn3dSnow() : this.spawnSnow(); this.dlog("+снежок");
+  }
   devClearSnow() { this.snow = []; this.dlog("снежки убраны"); }
   // строка статуса для dev-панели (компонент обновляет её своим интервалом)
   devStatusLine(boardMode: string) {
@@ -414,7 +420,10 @@ export class GameEngine {
     // расписание зон: v1 (старые реплеи) — 2D/3D по 60с; v2 — цикл 2D→3D→зумба по 60с
     if (this.simV <= 1) { this.mode3d = this.time >= 60 && Math.floor(this.time / 60) % 2 === 1; this.zuma = false; }
     else { const blk = this.time >= 60 ? Math.floor(this.time / 60) % 3 : 0; this.mode3d = blk === 1; this.zuma = blk === 2; }
-    if (this.debug.on && this.debug.force3d !== "auto" && !this.REPLAYING) { this.mode3d = this.debug.force3d === "on"; if (this.mode3d) this.zuma = false; }
+    if (this.debug.on && this.debug.force3d !== "auto" && !this.REPLAYING) {
+      const fz = this.debug.force3d;   // принудительная зона из dev-меню: 2D / 3D / зумба
+      this.mode3d = fz === "on"; this.zuma = fz === "zuma";
+    }
     const zone = this.mode3d ? "3d" : this.zuma ? "zuma" : "2d";
     if (zone !== this.wasZone) {
       this.wasZone = zone; this.prepT = 3; this.gifts = []; this.snow = []; this.tGift = .5; this.tSnow = 1.2;
