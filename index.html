@@ -53,7 +53,7 @@
     <button id="startBtn">▶ Начать игру</button>
     <div class="bTitle">🏆 Таблица рекордов</div>
     <div class="board" id="menuBoard"></div>
-    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза</div>
+    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза<br>С 60-й секунды начинаются 🌀 3D-зоны: переключай полосы!</div>
   </div>
 
   <div id="over" class="overlay hidden">
@@ -242,6 +242,7 @@ function reset() {
   player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
   gifts = []; snow = []; parts = []; pops = [];
   tGift = 0.6; tSnow = 1.4;
+  mode3d = was3d = false; lane = laneF = 0; bannerT = 0; zoff = 0;
   makeBack();
 }
 makeBack(); player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
@@ -265,12 +266,149 @@ function burst(x, y, colors) {
   }
 }
 
+/* ======================= 3D-зоны ======================= */
+/* Каждую вторую минуту (60-120с, 180-240с...) игра становится 3D-бегунком:
+   перспектива, 3 полосы, предметы летят из глубины экрана на камеру. */
+let mode3d = false, was3d = false, lane = 0, laneF = 0, bannerT = 0, bannerTxt = "", zoff = 0, trees3 = [];
+const LANE_W = 3, Z_PL = 2.6, Z_FAR = 100, FOC = 360, HOR = H * 0.40, KY = 990;
+const proj = (xRel, z) => ({ X: W / 2 + xRel * FOC / z, Y: HOR + KY / z, s: FOC / z });
+const fade = z => Math.max(0.05, Math.min(1, (Z_FAR - z) / 45));
+const relX = o => (o.lane - laneF) * LANE_W + (o.ox || 0);
+const run3 = () => 42 + 12 * diff();
+function makeTrees3() {
+  trees3 = [];
+  for (let i = 0; i < 18; i++) trees3.push({ x: (Math.random() < .5 ? -1 : 1) * (5.4 + Math.random() * 5), z: Math.random() * Z_FAR, s: .7 + Math.random() * .9 });
+}
+function spawn3dGift() { gifts.push({ lane: (Math.random() * 3 | 0) - 1, ox: 0, z: Z_FAR, bonus: Math.random() < .08, seed: Math.random() * 6.28, r: 26 }); }
+function spawn3dSnow() { snow.push({ lane: (Math.random() * 3 | 0) - 1, ox: 0, z: Z_FAR, r: 20 + Math.random() * 10, seed: Math.random() * 6.28 }); }
+function changeLane(d) { lane = Math.max(-1, Math.min(1, lane + d)); }
+
+function update3d(dt) {
+  laneF += (lane - laneF) * Math.min(1, dt * 9);
+  player.x = W / 2; player.tx = W / 2;
+  zoff = (zoff + run3() * dt) % 6;
+  tGift -= dt; if (tGift <= 0) { spawn3dGift(); tGift = Math.max(.5, 1.2 - time / 260); }
+  tSnow -= dt; if (tSnow <= 0) { if (snow.length < 8) spawn3dSnow(); if (diff() > 1.8 && Math.random() < .4 && snow.length < 8) spawn3dSnow(); tSnow = Math.max(.38, .95 - time / 380); }
+  const v = run3() * dt;
+  for (const t of trees3) { t.z -= v; if (t.z < 1.5) { t.z += Z_FAR; t.x = (Math.random() < .5 ? -1 : 1) * (5.4 + Math.random() * 5); t.s = .7 + Math.random() * .9; } }
+  for (let i = gifts.length - 1; i >= 0; i--) {
+    const g = gifts[i]; g.z -= v; g.ox = Math.sin(time * 2 + g.seed) * .35;
+    if (g.z <= Z_PL && Math.abs(g.lane - laneF) < .55) {
+      const p = proj(relX(g), Z_PL);
+      const val = g.bonus ? 50 : 10; score += val; giftsGot++;
+      pops.push({ x: p.X, y: p.Y - 40, t: 0, txt: "+" + val, c: g.bonus ? "#ffd75e" : "#9dffb0" });
+      burst(p.X, p.Y - 30, g.bonus ? ["#ffd75e", "#fff3b0", "#ffb347"] : ["#ff5d5d", "#ffd75e", "#7ec8ff"]);
+      sfx(g.bonus ? [1046, 1318, 1568, 2093] : [880, 1318], .07, "square", .14);
+      gifts.splice(i, 1); continue;
+    }
+    if (g.z < 1) gifts.splice(i, 1);
+  }
+  for (let i = snow.length - 1; i >= 0; i--) {
+    const s = snow[i]; s.z -= v; s.ox = Math.sin(time * 3 + s.seed) * .5;
+    if (s.z <= Z_PL && player.inv <= 0 && Math.abs(s.lane - laneF) < .5) {
+      lives--; snow.splice(i, 1); shakeT = .35;
+      burst(W / 2, HOR + KY / Z_PL - 60, ["#ffffff", "#bfe4ff", "#7ec8ff"]);
+      sfx([180, 120, 90], .09, "sawtooth", .2);
+      if (lives <= 0) gameOver();
+      continue;
+    }
+    if (s.z < 1) snow.splice(i, 1);
+  }
+}
+
+function draw3dGround() {
+  const hf = laneF * LANE_W;
+  const gg = ctx.createLinearGradient(0, HOR, 0, H);
+  gg.addColorStop(0, "#8ba3cf"); gg.addColorStop(.12, "#c9d9f2"); gg.addColorStop(1, "#edf5ff");
+  ctx.fillStyle = gg; ctx.fillRect(0, HOR - 1, W, H - HOR + 1);
+  // трасса (трапеция)
+  const hw = 2.25 * LANE_W;
+  ctx.fillStyle = "rgba(140,172,218,.55)";
+  ctx.beginPath();
+  ctx.moveTo(W / 2 + (-hw - hf) * FOC / Z_FAR, HOR + KY / Z_FAR);
+  ctx.lineTo(W / 2 + (hw - hf) * FOC / Z_FAR, HOR + KY / Z_FAR);
+  ctx.lineTo(W / 2 + (hw - hf) * FOC / 1.4, HOR + KY / 1.4);
+  ctx.lineTo(W / 2 + (-hw - hf) * FOC / 1.4, HOR + KY / 1.4);
+  ctx.closePath(); ctx.fill();
+  // полосы-разделители
+  ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = 2;
+  for (const dx of [-LANE_W / 2, LANE_W / 2]) {
+    ctx.beginPath();
+    ctx.moveTo(W / 2 + (dx - hf) * FOC / Z_FAR, HOR + KY / Z_FAR);
+    ctx.lineTo(W / 2 + (dx - hf) * FOC / 1.4, HOR + KY / 1.4);
+    ctx.stroke();
+  }
+  // бегущие поперечные штрихи — ощущение скорости
+  for (let z = 2 + ((6 - zoff) % 6); z < Z_FAR; z += 6) {
+    const a = Math.max(0, .45 * (1 - z / Z_FAR));
+    if (a <= 0.01) continue;
+    ctx.strokeStyle = "rgba(255,255,255," + a + ")"; ctx.lineWidth = Math.max(1, FOC / z * .05);
+    const y = HOR + KY / z;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 + (-hw - hf) * FOC / z, y);
+    ctx.lineTo(W / 2 + (hw - hf) * FOC / z, y);
+    ctx.stroke();
+  }
+  // ёлки по обочинам (сортировка: дальние раньше)
+  for (const t of [...trees3].sort((a, b) => b.z - a.z)) {
+    const p = proj(t.x - hf, t.z);
+    if (p.Y < HOR || p.Y > H + 300) continue;
+    const h = p.s * 3.4 * t.s, w = h * .55, al = fade(t.z);
+    ctx.globalAlpha = al;
+    ctx.fillStyle = "#5b4126"; ctx.fillRect(p.X - w * .06, p.Y - h * .18, w * .12, h * .2);
+    ctx.fillStyle = "#173f33";
+    ctx.beginPath(); ctx.moveTo(p.X, p.Y - h); ctx.lineTo(p.X - w / 2, p.Y); ctx.lineTo(p.X + w / 2, p.Y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    ctx.beginPath(); ctx.moveTo(p.X, p.Y - h); ctx.lineTo(p.X - w * .22, p.Y - h * .66); ctx.lineTo(p.X + w * .22, p.Y - h * .66); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function draw3dItems() {
+  const all = [];
+  for (const g of gifts) all.push({ kind: "gift", o: g });
+  for (const s of snow) all.push({ kind: "snow", o: s });
+  all.sort((a, b) => b.o.z - a.o.z);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const it of all) {
+    const o = it.o, p = proj(relX(o), Math.max(1.3, o.z)), al = fade(o.z);
+    if (p.Y < HOR) continue;
+    ctx.globalAlpha = al;
+    if (it.kind === "gift") {
+      const size = Math.max(7, Math.min(200, p.s * .8));
+      ctx.font = size + "px " + EMOJI_FONT;
+      ctx.save(); ctx.translate(p.X, p.Y - size * .4); ctx.rotate(Math.sin(time * 3 + o.seed) * .2);
+      ctx.fillText(o.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
+    } else {
+      const r = Math.max(2, Math.min(120, p.s * o.r * .02));
+      const rg = ctx.createRadialGradient(p.X - r * .3, p.Y - r * 1.2 - r * .3, r * .2, p.X, p.Y - r * 1.2, r);
+      rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#9db8d8");
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(p.X, p.Y - r * 1.2, r, 0, 6.29); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  // Дед Мороз (всегда по центру, наклоняется при смене полосы)
+  const py = HOR + KY / Z_PL - 46;
+  ctx.fillStyle = "rgba(0,0,0,.22)";
+  ctx.beginPath(); ctx.ellipse(W / 2, py + 62, 64, 15, 0, 0, 6.29); ctx.fill();
+  const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
+  ctx.globalAlpha = blink ? .3 : 1;
+  ctx.save(); ctx.translate(W / 2, py); ctx.rotate((lane - laneF) * .35);
+  ctx.font = "148px " + EMOJI_FONT; ctx.fillText("🎅", 0, 0); ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
 /* ---------- ввод ---------- */
 let keys = {};
 addEventListener("keydown", e => {
   if (e.target && e.target.tagName === "INPUT") return;   // не мешать вводу имени
   if (["ArrowLeft", "ArrowRight", "a", "d", "A", "D", " "].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
+  if (state === "play" && mode3d && !e.repeat) {
+    const k = e.key.toLowerCase();
+    if (k === "arrowleft" || k === "a") changeLane(-1);
+    if (k === "arrowright" || k === "d") changeLane(1);
+  }
   if (e.key.toLowerCase() === "p") {
     if (state === "play") state = "pause";
     else if (state === "pause") state = "play";
@@ -281,8 +419,15 @@ function pointerX(e) {
   const r = cv.getBoundingClientRect();
   return ((e.touches ? e.touches[0].clientX : e.clientX) - r.left) / scale;
 }
-cv.addEventListener("pointerdown", e => { if (state === "play") player.tx = pointerX(e); });
-cv.addEventListener("pointermove", e => { if (state === "play" && (e.buttons || e.pointerType === "touch")) player.tx = pointerX(e); });
+let pdX = 0;
+cv.addEventListener("pointerdown", e => { pdX = pointerX(e); if (state === "play" && !mode3d) player.tx = pdX; });
+cv.addEventListener("pointermove", e => { if (state === "play" && !mode3d && (e.buttons || e.pointerType === "touch")) player.tx = pointerX(e); });
+cv.addEventListener("pointerup", e => {
+  if (state !== "play" || !mode3d) return;
+  const x = pointerX(e), d = x - pdX;
+  if (Math.abs(d) > 24) changeLane(d > 0 ? 1 : -1);          // свайп
+  else changeLane(x < W / 2 ? -1 : 1);                        // тап по половине экрана
+});
 
 /* ---------- обновление ---------- */
 function update(dt) {
@@ -292,16 +437,37 @@ function update(dt) {
     f.x += Math.sin(time * 0.7 + f.p) * 12 * dt;
     if (f.y > H + 5) { f.y = -5; f.x = Math.random() * W; }
   }
+  if (state !== "play") return;
   for (const t of trees) {
-    t.y += fallSpeedOrIdle() * 0.22 * t.s * dt;
+    t.y += fallSpeed() * 0.22 * t.s * dt;
     if (t.y > H + 60) { t.y = -70; t.x = Math.random() * W; t.s = 0.5 + Math.random() * 0.7; }
   }
-  if (state !== "play") return;
 
   time += dt;
   player.inv = Math.max(0, player.inv - dt);
   shakeT = Math.max(0, shakeT - dt);
+  bannerT = Math.max(0, bannerT - dt);
 
+  // 3D-зоны: каждую вторую минуту (60-120с, 180-240с...)
+  mode3d = time >= 60 && Math.floor(time / 60) % 2 === 1;
+  if (mode3d !== was3d) {
+    was3d = mode3d; bannerT = 2.4; gifts = []; snow = []; tGift = .5; tSnow = 1.2;
+    bannerTxt = mode3d ? "🌀 3D-ЗОНА! Полосы: ← →" : "❄ Снова вид сверху!";
+    if (mode3d) makeTrees3();
+    else { player.tx = W / 2; }
+  }
+
+  if (mode3d) update3d(dt); else update2d(dt);
+
+  // частицы и попапы
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 500 * dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+  for (let i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; pops[i].y -= 45 * dt; if (pops[i].t > 1) pops.splice(i, 1); }
+}
+
+function update2d(dt) {
   // движение
   const kl = keys["arrowleft"] || keys["a"], kr = keys["arrowright"] || keys["d"];
   if (kl || kr) player.tx += ((kr ? 1 : 0) - (kl ? 1 : 0)) * 560 * diff() * dt;
@@ -340,14 +506,7 @@ function update(dt) {
     }
     if (s.y > H + 40) snow.splice(i, 1);
   }
-  // частицы и попапы
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const p = parts[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 500 * dt;
-    if (p.life <= 0) parts.splice(i, 1);
-  }
-  for (let i = pops.length - 1; i >= 0; i--) { pops[i].t += dt; pops[i].y -= 45 * dt; if (pops[i].t > 1) pops.splice(i, 1); }
 }
-function fallSpeedOrIdle() { return state === "play" ? fallSpeed() : 140; }
 
 function gameOver() {
   state = "over";
@@ -394,27 +553,38 @@ function draw() {
   ctx.fillStyle = "#f5f0c8"; ctx.beginPath(); ctx.arc(W - 70, 80, 30, 0, 6.29); ctx.fill();
   ctx.fillStyle = "rgba(245,240,200,.12)"; ctx.beginPath(); ctx.arc(W - 70, 80, 48, 0, 6.29); ctx.fill();
 
-  for (const t of trees) drawTree(t);
+  if (mode3d) draw3dGround(); else for (const t of trees) drawTree(t);
   // снег
   ctx.fillStyle = "rgba(255,255,255,.85)";
   for (const f of flakes) { ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 6.29); ctx.fill(); }
 
   if (state !== "menu") {
-    // подарки
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    for (const g of gifts) {
-      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
-      ctx.font = (g.bonus ? 42 : 44) + "px " + EMOJI_FONT;
-      ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
-    }
-    // снежки
-    for (const s of snow) {
-      const x = s.x + Math.sin(s.p) * s.amp;
-      const rg = ctx.createRadialGradient(x - s.r * .3, s.y - s.r * .3, s.r * .2, x, s.y, s.r);
-      rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#9db8d8");
-      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, 6.29); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,.35)";
-      ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
+    if (mode3d) {
+      draw3dItems();
+    } else {
+      // подарки
+      for (const g of gifts) {
+        ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
+        ctx.font = (g.bonus ? 42 : 44) + "px " + EMOJI_FONT;
+        ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
+      }
+      // снежки
+      for (const s of snow) {
+        const x = s.x + Math.sin(s.p) * s.amp;
+        const rg = ctx.createRadialGradient(x - s.r * .3, s.y - s.r * .3, s.r * .2, x, s.y, s.r);
+        rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#9db8d8");
+        ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, 6.29); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,.35)";
+        ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
+      }
+      // дед мороз
+      const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
+      ctx.globalAlpha = blink ? 0.3 : 1;
+      ctx.font = 72 + "px " + EMOJI_FONT;
+      ctx.save(); ctx.translate(player.x, player.y); ctx.rotate((player.tx - player.x) * 0.002);
+      ctx.fillText("🎅", 0, 0); ctx.restore();
+      ctx.globalAlpha = 1;
     }
     // частицы
     for (const p of parts) {
@@ -426,13 +596,6 @@ function draw() {
       ctx.globalAlpha = 1 - p.t; ctx.fillStyle = p.c; ctx.font = "bold 26px " + EMOJI_FONT;
       ctx.fillText(p.txt, p.x, p.y); ctx.globalAlpha = 1;
     }
-    // дед мороз
-    const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
-    ctx.globalAlpha = blink ? 0.3 : 1;
-    ctx.font = 72 + "px " + EMOJI_FONT;
-    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate((player.tx - player.x) * 0.002);
-    ctx.fillText("🎅", 0, 0); ctx.restore();
-    ctx.globalAlpha = 1;
   }
 
   // HUD
@@ -440,10 +603,16 @@ function draw() {
     ctx.textAlign = "left"; ctx.fillStyle = "#fff"; ctx.font = "bold 24px Arial";
     ctx.fillText("🎁 " + score, 16, 34);
     ctx.font = "15px Arial"; ctx.fillStyle = "#9fb4ff";
-    ctx.fillText("ур. " + diff().toFixed(1) + " · " + Math.floor(time) + "с", 18, 58);
+    ctx.fillText("ур. " + diff().toFixed(1) + " · " + Math.floor(time) + "с" + (mode3d ? " · 🌀3D" : ""), 18, 58);
     ctx.textAlign = "right"; ctx.font = "24px " + EMOJI_FONT;
     let h = ""; for (let i = 0; i < 3; i++) h += i < lives ? "❤️ " : "🖤 ";
     ctx.fillText(h, W - 14, 34);
+  }
+  if (state === "play" && bannerT > 0) {
+    ctx.globalAlpha = Math.min(1, bannerT);
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffd75e"; ctx.font = "bold 40px Arial";
+    ctx.fillText(bannerTxt, W / 2, H * 0.30);
+    ctx.globalAlpha = 1;
   }
   if (state === "pause") {
     ctx.fillStyle = "rgba(5,10,30,.6)"; ctx.fillRect(0, 0, W, H);
