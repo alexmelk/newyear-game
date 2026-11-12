@@ -468,12 +468,20 @@ export class GameEngine {
     }
   }
   drawSanta(s: number) {
-    // игрок — эмодзи Деда Мороза: без свечения, стандартный размер (как в v2.0.3)
+    // игрок — эмодзи Деда Мороза, светится как подарки: ореол + тень + двойная отрисовка
     const ctx = this.ctx;
     ctx.save(); ctx.scale(s, s);
+    const glow = ctx.createRadialGradient(0, 0, 5, 0, 0, 58);
+    glow.addColorStop(0, "rgba(255,150,110,.85)");
+    glow.addColorStop(.55, "rgba(255,110,90,.32)");
+    glow.addColorStop(1, "rgba(255,90,80,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(0, 0, 58, 0, 6.29); ctx.fill();
     ctx.font = "80px " + this.EMOJI_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.shadowColor = "#ff7a66"; ctx.shadowBlur = 18;
     ctx.fillText("🎅", 0, 0);
+    ctx.fillText("🎅", 0, 0);   // двойная отрисовка усиливает свечение (приём из 2D-подарков)
     ctx.restore();
   }
   draw3dGround() {
