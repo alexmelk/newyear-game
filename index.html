@@ -22,6 +22,16 @@
   .mini{padding:8px 16px;font-size:14px;font-weight:400;color:#cfd8ff;background:rgba(255,255,255,.1);box-shadow:none}
   .hidden{display:none!important}
   #sndBtn{position:absolute;right:12px;top:12px;z-index:11}
+  #dev{position:absolute;left:8px;bottom:8px;z-index:12;width:246px;background:rgba(6,10,26,.9);
+    border:1px solid #3a4a7a;border-radius:10px;padding:9px;color:#9ff;font:11px Consolas,monospace}
+  #devHead{display:flex;justify-content:space-between;align-items:center;font-weight:bold;color:#ffd75e;margin-bottom:6px;font-size:12px}
+  #devHead button{padding:1px 7px;font-size:12px;background:rgba(255,255,255,.12);color:#cfd8ff}
+  .devBtns{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+  .devBtns button{padding:4px 7px;font-size:11px;font-weight:400;border-radius:6px;
+    background:rgba(255,255,255,.1);color:#cfd8ff;box-shadow:none}
+  .devBtns button.on{background:#2b6d36;color:#b9f7c5}
+  #devInfo{color:#8fa0d8;margin-bottom:4px;white-space:pre-wrap}
+  #devLog{max-height:92px;overflow-y:auto;color:#7ffa9a;white-space:pre-wrap}
   .score-line{font-size:26px;margin:8px 0 2px;color:#fff}
   .record{font-size:15px;color:#ffd75e;margin-bottom:14px}
   .bTitle{font-size:16px;font-weight:700;color:#fff;margin:16px 0 6px}
@@ -72,6 +82,24 @@
   </div>
 
   <button id="sndBtn" class="mini hidden">🔊 Музыка</button>
+
+  <div id="dev" class="hidden">
+    <div id="devHead">🛠 Режим разработчика (F2) <button id="devHide">✕</button></div>
+    <div class="devBtns">
+      <button id="dInv">🛡 неуязв. (I)</button>
+      <button id="dLives">∞ жизни</button>
+      <button id="dSlow">🐢 слоу-мо (K)</button>
+      <button id="dBox">☐ хитбоксы (H)</button>
+      <button id="dT">🌀 3D: авто (T)</button>
+      <button id="dJump">⏩ +30с (J)</button>
+      <button id="dGift">🎁 спавн (G)</button>
+      <button id="dSnow">❄ спавн (N)</button>
+      <button id="dClear">🧹 снежки (X)</button>
+      <button id="dBoard">📡 борд</button>
+    </div>
+    <div id="devInfo"></div>
+    <div id="devLog"></div>
+  </div>
 </div>
 
 <script>
@@ -196,14 +224,23 @@ async function submitScore(rawName) {
   myKey = name + "|" + score;
   if (mode === "supabase") {
     try {
-      const r = await fetch(SUPABASE_URL + "/rest/v1/scores", {
-        method: "POST", headers: Object.assign({ "prefer": "return=minimal" }, sbH), body: JSON.stringify([item]) });
-      if (r.ok || r.status === 201) { savedThisRound = true; markSaved(); await loadBoard(); return; }
-    } catch (e) { /* fallback ниже */ }
+      // только через Edge-функцию: она валидирует score/time и душит спам.
+      // Прямая запись в БД анонимом закрыта (RLS insert policy удалена).
+      const r = await fetch(SUPABASE_URL + "/functions/v1/submit-score", {
+        method: "POST", headers: sbH, body: JSON.stringify({ name, score, time: Math.floor(time) }) });
+      if (r.ok) {
+        board = await r.json(); savedThisRound = true; markSaved(); renderBoards();
+        dlog("board: score accepted"); return;
+      }
+      const txt = await r.text();
+      dlog("board REJECT " + r.status + ": " + txt.slice(0, 120));
+      rejectSave(r.status); return;
+    } catch (e) { dlog("board сеть: " + e.message); /* fallback ниже */ }
   } else if (mode === "server") {
     try {
-      const r = await fetch("/api/scores", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) });
+      const r = await fetch("/api/scores", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...item, time: Math.floor(time) }) });
       if (r.ok) { board = await r.json(); savedThisRound = true; markSaved(); renderBoards(); return; }
+      if (r.status === 400) { rejectSave(400); return; }
     } catch (e) { /* fallback ниже */ }
   }
   board.push(item); sortBoard(); board = board.slice(0, 50); saveLocal();
@@ -212,6 +249,11 @@ async function submitScore(rawName) {
 function markSaved() {
   const b = document.getElementById("saveBtn");
   b.disabled = true; b.textContent = "✓ Сохранено";
+}
+function rejectSave(status) {
+  const b = document.getElementById("saveBtn");
+  b.textContent = status === 429 ? "Позже попробуй ⏳" : "⛔ Отклонено";
+  setTimeout(() => { b.textContent = "💾 В таблицу"; }, 4000);
 }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 function boardHTML() {
@@ -305,11 +347,11 @@ function update3d(dt) {
   }
   for (let i = snow.length - 1; i >= 0; i--) {
     const s = snow[i]; s.z -= v; s.ox = Math.sin(time * 3 + s.seed) * .5;
-    if (s.z <= Z_PL && player.inv <= 0 && Math.abs(s.lane - laneF) < .5) {
-      lives--; snow.splice(i, 1); shakeT = .35;
+    if (s.z <= Z_PL && canHit() && Math.abs(s.lane - laneF) < .5) {
+      snow.splice(i, 1);
       burst(W / 2, HOR + KY / Z_PL - 60, ["#ffffff", "#bfe4ff", "#7ec8ff"]);
       sfx([180, 120, 90], .09, "sawtooth", .2);
-      if (lives <= 0) gameOver();
+      takeHit();
       continue;
     }
     if (s.z < 1) snow.splice(i, 1);
@@ -398,6 +440,71 @@ function draw3dItems() {
   ctx.globalAlpha = 1;
 }
 
+/* ======================= dev mode ======================= */
+const debug = {
+  on: /(\?|&)debug=1/.test(location.search) || location.hash === "#dev" || localStorage.getItem("xmasDebug") === "1",
+  inv: false, inflives: false, slow: false, boxes: false,
+  force3d: "auto",       // auto | on | off
+  fps: 0, log: []
+};
+function dlog(msg) {
+  if (!debug.on) return;
+  debug.log.push("[" + (typeof time === "number" ? time.toFixed(1) : "0") + "s] " + msg);
+  if (debug.log.length > 12) debug.log.shift();
+  const el = document.getElementById("devLog"); if (el) el.textContent = debug.log.join("\n");
+}
+function toggleDebug(force) {
+  debug.on = (force === undefined) ? !debug.on : !!force;
+  localStorage.setItem("xmasDebug", debug.on ? "1" : "0");
+  document.getElementById("dev").classList.toggle("hidden", !debug.on);
+  if (debug.on) dlog("dev panel ON — F2 выключить");
+}
+const canHit = () => player.inv <= 0 && !(debug.on && debug.inv);
+function takeHit() {
+  player.inv = 1.6; shakeT = 0.35;
+  if (debug.on && debug.inflives) { dlog("hit! (∞ жизни)"); return; }
+  lives--;
+  if (debug.on) dlog("hit, lives=" + lives);
+  if (lives <= 0) gameOver();
+}
+function cycleForce3d() {
+  debug.force3d = debug.force3d === "auto" ? "on" : debug.force3d === "on" ? "off" : "auto";
+  dlog("force3d = " + debug.force3d);
+}
+async function testBoard() {
+  dlog("борд-тест...");
+  try {
+    const u = SB ? SUPABASE_URL + "/rest/v1/scores?select=name,score&order=score.desc&limit=3" : ON_NET ? "/api/scores" : null;
+    if (!u) { dlog("board mode = local (нет API)"); return; }
+    const r = await fetch(u, SB ? { headers: sbH } : {});
+    const j = r.ok ? await r.json() : null;
+    dlog("HTTP " + r.status + " mode=" + mode + (j ? " top1=" + (j[0] ? j[0].name + ":" + j[0].score : "пусто") : ""));
+  } catch (e) { dlog("ОШИБКА: " + e.message); }
+}
+function wireDev() {
+  document.getElementById("devHide").onclick = () => toggleDebug(false);
+  const tog = (id, key, label) => { const b = document.getElementById(id); b.onclick = () => { debug[key] = !debug[key]; b.classList.toggle("on", debug[key]); dlog(label + " = " + debug[key]); }; };
+  tog("dInv", "inv", "неуязвимость"); tog("dLives", "inflives", "∞жизни");
+  tog("dSlow", "slow", "слоу-мо"); tog("dBox", "boxes", "хитбоксы");
+  document.getElementById("dT").onclick = e => { cycleForce3d(); e.target.classList.toggle("on", debug.force3d !== "auto"); };
+  document.getElementById("dJump").onclick = () => { time += 30; dlog("time → " + Math.floor(time) + "с"); };
+  document.getElementById("dGift").onclick = () => { mode3d ? spawn3dGift() : spawnGift(); dlog("+подарок"); };
+  document.getElementById("dSnow").onclick = () => { mode3d ? spawn3dSnow() : spawnSnow(); dlog("+снежок"); };
+  document.getElementById("dClear").onclick = () => { snow = []; dlog("снежки убраны"); };
+  document.getElementById("dBoard").onclick = testBoard;
+  setInterval(() => {
+    if (!debug.on) return;
+    const set = (id, v) => document.getElementById(id).classList.toggle("on", !!v);
+    set("dInv", debug.inv); set("dLives", debug.inflives); set("dSlow", debug.slow); set("dBox", debug.boxes);
+    document.getElementById("dT").textContent = "🌀 3D: " + debug.force3d + " (T)";
+    document.getElementById("devInfo").textContent =
+      "state:" + state + " | " + (mode3d ? "3D" : "2D") + " | fps:" + debug.fps +
+      " | board:" + mode + "\nt:" + time.toFixed(0) + "с diff:" + diff().toFixed(2) +
+      " g:" + gifts.length + " s:" + snow.length + " p:" + parts.length;
+  }, 500);
+  addEventListener("error", e => dlog("JS ERROR: " + e.message));
+}
+
 /* ---------- ввод ---------- */
 let keys = {};
 addEventListener("keydown", e => {
@@ -408,6 +515,18 @@ addEventListener("keydown", e => {
     const k = e.key.toLowerCase();
     if (k === "arrowleft" || k === "a") changeLane(-1);
     if (k === "arrowright" || k === "d") changeLane(1);
+  }
+  if (e.key === "F2") { e.preventDefault(); toggleDebug(); }
+  if (debug.on && state === "play" && !e.repeat) {
+    const k2 = e.key.toLowerCase();
+    if (k2 === "i") { debug.inv = !debug.inv; dlog("неуязвимость = " + debug.inv); }
+    if (k2 === "j") { time += 30; dlog("time → " + Math.floor(time) + "с"); }
+    if (k2 === "k") { debug.slow = !debug.slow; dlog("слоу-мо = " + debug.slow); }
+    if (k2 === "h") { debug.boxes = !debug.boxes; }
+    if (k2 === "t") cycleForce3d();
+    if (k2 === "g") { mode3d ? spawn3dGift() : spawnGift(); }
+    if (k2 === "n") { mode3d ? spawn3dSnow() : spawnSnow(); }
+    if (k2 === "x") { snow = []; dlog("снежки убраны"); }
   }
   if (e.key.toLowerCase() === "p") {
     if (state === "play") state = "pause";
@@ -450,6 +569,7 @@ function update(dt) {
 
   // 3D-зоны: каждую вторую минуту (60-120с, 180-240с...)
   mode3d = time >= 60 && Math.floor(time / 60) % 2 === 1;
+  if (debug.on && debug.force3d !== "auto") mode3d = debug.force3d === "on";
   if (mode3d !== was3d) {
     was3d = mode3d; bannerT = 2.4; gifts = []; snow = []; tGift = .5; tSnow = 1.2;
     bannerTxt = mode3d ? "🌀 3D-ЗОНА! Полосы: ← →" : "❄ Снова вид сверху!";
@@ -497,11 +617,11 @@ function update2d(dt) {
   for (let i = snow.length - 1; i >= 0; i--) {
     const s = snow[i]; s.y += s.vy * dt; s.p += dt * s.sp;
     const d = Math.hypot(s.x + Math.sin(s.p) * s.amp - player.x, s.y - player.y);
-    if (player.inv <= 0 && d < s.r + player.r * 0.62) {
-      lives--; snow.splice(i, 1); shakeT = 0.35;
+    if (canHit() && d < s.r + player.r * 0.62) {
+      snow.splice(i, 1);
       burst(player.x, player.y - 10, ["#ffffff", "#bfe4ff", "#7ec8ff"]);
       sfx([180, 120, 90], 0.09, "sawtooth", 0.2);
-      if (lives <= 0) gameOver();
+      takeHit();
       continue;
     }
     if (s.y > H + 40) snow.splice(i, 1);
@@ -510,6 +630,7 @@ function update2d(dt) {
 
 function gameOver() {
   state = "over";
+  if (debug.on) dlog("GAME OVER score=" + score + " (t=" + time.toFixed(0) + "с)");
   sfx([660, 550, 440, 330, 262], 0.16, "triangle", 0.2);
   const prevHigh = +(localStorage.getItem("xmasHigh") || 0);
   const rec = score > prevHigh;
@@ -608,6 +729,33 @@ function draw() {
     let h = ""; for (let i = 0; i < 3; i++) h += i < lives ? "❤️ " : "🖤 ";
     ctx.fillText(h, W - 14, 34);
   }
+  if (debug.on) {
+    ctx.textAlign = "left"; ctx.font = "12px Consolas, monospace"; ctx.fillStyle = "#7ffa9a";
+    ctx.fillText("DEV fps:" + debug.fps + " t:" + time.toFixed(1) + "с " + (mode3d ? "3D" : "2D") +
+      " lvl:" + diff().toFixed(2) + " g:" + gifts.length + " s:" + snow.length, 14, H - 34);
+    ctx.fillText("lives:" + lives + " inv:" + player.inv.toFixed(1) +
+      (debug.slow ? " SLOW" : "") + (debug.inv ? " INV" : "") + (debug.inflives ? " ∞" : ""), 14, H - 18);
+    if (debug.boxes) {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255,255,0,.5)"; ctx.beginPath(); ctx.moveTo(0, HOR); ctx.lineTo(W, HOR); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,90,90,.95)";
+      ctx.beginPath(); ctx.arc(player.x, player.y, player.r * 0.65, 0, 6.29); ctx.stroke();
+      if (mode3d) {
+        ctx.strokeStyle = "rgba(0,220,255,.8)";
+        const yN = HOR + KY / Z_PL;
+        ctx.beginPath(); ctx.moveTo(0, yN - 60); ctx.lineTo(W, yN - 60); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,90,90,.95)";
+        for (const s of snow) { const p = proj(relX(s), Math.max(1.3, s.z)); ctx.beginPath(); ctx.arc(p.X, p.Y - Math.max(2, p.s * s.r * .02) * 1.2, Math.max(2, p.s * s.r * .02), 0, 6.29); ctx.stroke(); }
+        ctx.strokeStyle = "rgba(0,255,120,.8)";
+        for (const g of gifts) { const p = proj(relX(g), Math.max(1.3, g.z)); ctx.beginPath(); ctx.arc(p.X, p.Y - p.s * .3, Math.max(3, p.s * .4), 0, 6.29); ctx.stroke(); }
+      } else {
+        ctx.strokeStyle = "rgba(255,90,90,.95)";
+        for (const s of snow) { ctx.beginPath(); ctx.arc(s.x + Math.sin(s.p) * s.amp, s.y, s.r, 0, 6.29); ctx.stroke(); }
+        ctx.strokeStyle = "rgba(0,255,120,.8)";
+        for (const g of gifts) { ctx.beginPath(); ctx.arc(g.x, g.y, g.r + player.r * 0.75, 0, 6.29); ctx.stroke(); }
+      }
+    }
+  }
   if (state === "play" && bannerT > 0) {
     ctx.globalAlpha = Math.min(1, bannerT);
     ctx.textAlign = "center"; ctx.fillStyle = "#ffd75e"; ctx.font = "bold 40px Arial";
@@ -627,8 +775,10 @@ function draw() {
 /* ---------- цикл ---------- */
 let last = performance.now();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
-  update(dt); draw();
+  const rawdt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (debug.on && rawdt > 0) debug.fps = Math.round(debug.fps ? debug.fps * 0.92 + (1 / rawdt) * 0.08 : 1 / rawdt);
+  update(rawdt * (debug.on && debug.slow ? 0.25 : 1));
+  draw();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -648,6 +798,8 @@ document.getElementById("saveBtn").onclick = () => submitScore(document.getEleme
 document.getElementById("sndBtn").onclick = () => setMusic(!musicOn);
 addEventListener("visibilitychange", () => { if (document.hidden && state === "play") state = "pause"; });
 loadBoard(); // таблица рекордов при запуске
+wireDev();
+if (debug.on) document.getElementById("dev").classList.remove("hidden");
 </script>
 </body>
 </html>
