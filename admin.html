@@ -39,7 +39,8 @@
 </table>
 <div class="note">
   ▶ — открыть реплей в игре (топ-3 тоже видят эту кнопку на общем борде).<br>
-  ⚠ «подозрительный» — аномальная плотность очков (&gt;35/сек); «✓ проверить» снимает флаг, если вручную всё ок.<br>
+  ⚠ «подозрительный» — аномальная плотность очков (&gt;35/сек); «✓ проверить» снимает флаг и обнуляет жалобы, если вручную всё ок.<br>
+  🚨 — жалобы от игроков («Читер!» при просмотре реплея); записи с жалобами показываются первыми.<br>
   🚫 Скрытые записи не попадают в общий борд, но остаются в базе с реплеем. ✖ — полное удаление.<br>
   Любая запись в борде уже прошла серверную проверку: честный seed раунда, сумма событий = очки,
   3 попадания, время ≤ реальному с момента старта раунда, раунд использован один раз.
@@ -77,6 +78,7 @@ async function refresh() {
   setStatus("Загружаю…");
   try {
     const rows = await call("list");
+    rows.sort((a, b) => (b.reports || 0) - (a.reports || 0));   // с жалобами — наверху
     setStatus("Записей: " + rows.length);
     rowsEl.innerHTML = rows.map(r => `
       <tr class="${r.hidden ? "hidden" : ""}">
@@ -84,11 +86,11 @@ async function refresh() {
         <td>${esc(r.name)}</td>
         <td class="sc">${r.score}</td>
         <td>${r.replay_bytes ? Math.round(r.replay_bytes / 1024) + "KB" : "—"}</td>
-        <td>${r.suspicious ? '<span class="badge">⚠ подозр.</span>' : ""}${r.hidden ? '<span class="badge">🚫 скрыт</span>' : '<span class="badge ok">в борде</span>'}</td>
+        <td>${r.reports ? `<span class="badge">🚨 ${r.reports}</span>` : ""}${r.suspicious ? '<span class="badge">⚠ подозр.</span>' : ""}${r.hidden ? '<span class="badge">🚫 скрыт</span>' : '<span class="badge ok">в борде</span>'}</td>
         <td class="acts">
           ${r.replay_bytes ? `<button class="sec" data-a="view" data-id="${r.id}">▶</button>` : ""}
           <button class="sec" data-a="${r.hidden ? "show" : "hide"}" data-id="${r.id}">${r.hidden ? "👁" : "🚫"}</button>
-          ${r.suspicious ? `<button class="sec" data-a="verify" data-id="${r.id}">✓</button>` : ""}
+          ${r.suspicious || r.reports ? `<button class="sec" data-a="verify" data-id="${r.id}">✓</button>` : ""}
           <button class="sec" data-a="del" data-id="${r.id}">✖</button>
         </td>
       </tr>`).join("") || '<tr><td colspan="6" style="color:#8fa0d8">пусто</td></tr>';
