@@ -43,6 +43,8 @@
   .bName{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
   .bScore{font-weight:700}
   .bEmpty{color:#8fa0d8;font-size:14px;padding:6px 10px}
+  .bPlay{flex:none;padding:1px 8px;font-size:11px;font-weight:400;border-radius:6px;
+    background:rgba(255,255,255,.14);color:#ffd75e;box-shadow:none}
   #saveArea{display:flex;gap:8px;justify-content:center;align-items:center;margin-top:14px}
   #nameInput{padding:11px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.25);
     background:rgba(255,255,255,.08);color:#fff;font-size:16px;width:150px;outline:none}
@@ -63,7 +65,7 @@
     <button id="startBtn">▶ Начать игру</button>
     <div class="bTitle">🏆 Таблица рекордов</div>
     <div class="board" id="menuBoard"></div>
-    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза<br>С 60-й секунды начинаются 🌀 3D-зоны: переключай полосы!</div>
+    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза<br>С 60-й секунды начинаются 🌀 3D-зоны: переключай полосы!<br>▶ у топ-3 рекордов — можно посмотреть реплей игрока</div>
   </div>
 
   <div id="over" class="overlay hidden">
@@ -200,7 +202,7 @@ const sbH = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY,
 async function loadBoard() {
   if (SB) {
     try {
-      const r = await fetch(SUPABASE_URL + "/rest/v1/scores?select=name,score,date&order=score.desc&limit=20", { headers: sbH });
+      const r = await fetch(SUPABASE_URL + "/rest/v1/scores?select=id,name,score,date&hidden=eq.false&order=score.desc&limit=20", { headers: sbH });
       if (r.ok) { board = await r.json(); mode = "supabase"; renderBoards(); return; }
     } catch (e) { /* уйдём в fallback */ }
   }
@@ -222,14 +224,18 @@ async function submitScore(rawName) {
   localStorage.setItem("xmasName", name);
   const item = { name, score, date: new Date().toISOString().slice(0, 10) };
   myKey = name + "|" + score;
-  if (mode === "supabase") {
+  const rpStr = rec ? (rec.dur = recT(), JSON.stringify(rec)) : null;
+  if (mode === "supabase" && round && rpStr) {
     try {
-      // только через Edge-функцию: она валидирует score/time и душит спам.
+      // только через Edge-функцию: она сверяет replay с серверным seed и
+      // суммой событий, проверяет раунд/временное окно и душит спам.
       // Прямая запись в БД анонимом закрыта (RLS insert policy удалена).
       const r = await fetch(SUPABASE_URL + "/functions/v1/submit-score", {
-        method: "POST", headers: sbH, body: JSON.stringify({ name, score, time: Math.floor(time) }) });
+        method: "POST", headers: sbH,
+        body: JSON.stringify({ name, score, time: Math.floor(time), roundId: round.roundId, replay: rpStr }) });
       if (r.ok) {
-        board = await r.json(); savedThisRound = true; markSaved(); renderBoards();
+        board = await r.json(); savedThisRound = true; round = null; rec = null;
+        markSaved(); renderBoards();
         dlog("board: score accepted"); return;
       }
       const txt = await r.text();
@@ -261,7 +267,7 @@ function boardHTML() {
   let shownMy = false;
   return board.slice(0, 10).map((e, i) => {
     const k = e.name + "|" + e.score, me = k === myKey && !shownMy; if (me) shownMy = true;
-    return `<div class="bRow${me ? " me" : ""}"><span class="bRank">${i + 1}.</span><span class="bName">${esc(e.name)}</span><span class="bScore">${e.score}</span></div>`;
+    return `<div class="bRow${me ? " me" : ""}"><span class="bRank">${i + 1}.</span><span class="bName">${esc(e.name)}</span><span class="bScore">${e.score}</span>${e.id && i < 3 ? `<button class="bPlay" title="Смотреть реплей" onclick="openReplay('${e.id}')">▶</button>` : ""}</div>`;
   }).join("");
 }
 function renderBoards() {
@@ -285,6 +291,9 @@ function reset() {
   gifts = []; snow = []; parts = []; pops = [];
   tGift = 0.6; tSnow = 1.4;
   mode3d = was3d = false; lane = laneF = 0; bannerT = 0; zoff = 0;
+  seed0 = (round ? round.seed : Math.random() * 4294967296) >>> 0;
+  rng = mulberry32(seed0);
+  if (!REPLAYING) rec = { v: 1, seed: seed0, dur: 0, inputs: [[0, Math.round(W / 2)]], ev: [], lastV: W / 2, lastT: 0 };
   makeBack();
 }
 makeBack(); player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
@@ -292,14 +301,31 @@ makeBack(); player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
 const diff = () => Math.min(3, 1 + time / 50);        // сложность растёт со временем
 const fallSpeed = () => 240 * diff();
 
+/* ---- детерминированная симуляция: seeded PRNG + рекордер реплеев ----
+   Весь геймплейный ранддом идёт от rng() с seed, выданным сервером
+   (start-round). Рекордер пишет inputs (ключевые кадры движения) и
+   ev (события очков/попаданий) — этого хватает, чтобы воспроизвести
+   и проверить раунд. Декор (снег, ёлки, частицы) остаётся на Math.random. */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let seed0 = (Math.random() * 4294967296) >>> 0, rng = mulberry32(seed0);
+let round = null, REPLAYING = false, scripted = null, rec = null;
+const recT = () => Math.round(time * 10) / 10;
+
 function spawnGift() {
-  const bonus = Math.random() < 0.07;
-  gifts.push({ x: 30 + Math.random() * (W - 60), y: -40, r: 26, rot: Math.random() * 0.5 - 0.25,
-    vy: fallSpeed() * (0.55 + Math.random() * 0.2), bonus, p: Math.random() * 6.28 });
+  const bonus = rng() < 0.07;
+  gifts.push({ x: 30 + rng() * (W - 60), y: -40, r: 26, rot: rng() * 0.5 - 0.25,
+    vy: fallSpeed() * (0.55 + rng() * 0.2), bonus, p: rng() * 6.28 });
 }
 function spawnSnow() {
-  snow.push({ x: 25 + Math.random() * (W - 50), y: -30, r: 15 + Math.random() * 9,
-    vy: fallSpeed() * (0.85 + Math.random() * 0.4), amp: 12 + 20 * Math.random() * diff(), p: Math.random() * 6.28, sp: 1.5 + Math.random() * 2 });
+  snow.push({ x: 25 + rng() * (W - 50), y: -30, r: 15 + rng() * 9,
+    vy: fallSpeed() * (0.85 + rng() * 0.4), amp: 12 + 20 * rng() * diff(), p: rng() * 6.28, sp: 1.5 + rng() * 2 });
 }
 function burst(x, y, colors) {
   for (let i = 0; i < 14; i++) {
@@ -321,16 +347,24 @@ function makeTrees3() {
   trees3 = [];
   for (let i = 0; i < 18; i++) trees3.push({ x: (Math.random() < .5 ? -1 : 1) * (5.4 + Math.random() * 5), z: Math.random() * Z_FAR, s: .7 + Math.random() * .9 });
 }
-function spawn3dGift() { gifts.push({ lane: (Math.random() * 3 | 0) - 1, ox: 0, z: Z_FAR, bonus: Math.random() < .08, seed: Math.random() * 6.28, r: 26 }); }
-function spawn3dSnow() { snow.push({ lane: (Math.random() * 3 | 0) - 1, ox: 0, z: Z_FAR, r: 20 + Math.random() * 10, seed: Math.random() * 6.28 }); }
-function changeLane(d) { lane = Math.max(-1, Math.min(1, lane + d)); }
+function spawn3dGift() { gifts.push({ lane: (rng() * 3 | 0) - 1, ox: 0, z: Z_FAR, bonus: rng() < .08, seed: rng() * 6.28, r: 26 }); }
+function spawn3dSnow() { snow.push({ lane: (rng() * 3 | 0) - 1, ox: 0, z: Z_FAR, r: 20 + rng() * 10, seed: rng() * 6.28 }); }
+function changeLane(d) {
+  lane = Math.max(-1, Math.min(1, lane + d));
+  if (rec && !REPLAYING && rec.inputs.length < 5900) rec.inputs.push([recT(), lane]);
+}
 
 function update3d(dt) {
+  if (REPLAYING && scripted) {
+    const ins = scripted.data.inputs;
+    while (scripted.ptr < ins.length - 1 && ins[scripted.ptr + 1][0] <= time) scripted.ptr++;
+    lane = ins[scripted.ptr][1] | 0;
+  }
   laneF += (lane - laneF) * Math.min(1, dt * 9);
   player.x = W / 2; player.tx = W / 2;
   zoff = (zoff + run3() * dt) % 6;
   tGift -= dt; if (tGift <= 0) { spawn3dGift(); tGift = Math.max(.5, 1.2 - time / 260); }
-  tSnow -= dt; if (tSnow <= 0) { if (snow.length < 8) spawn3dSnow(); if (diff() > 1.8 && Math.random() < .4 && snow.length < 8) spawn3dSnow(); tSnow = Math.max(.38, .95 - time / 380); }
+  tSnow -= dt; if (tSnow <= 0) { if (snow.length < 8) spawn3dSnow(); if (diff() > 1.8 && rng() < .4 && snow.length < 8) spawn3dSnow(); tSnow = Math.max(.38, .95 - time / 380); }
   const v = run3() * dt;
   for (const t of trees3) { t.z -= v; if (t.z < 1.5) { t.z += Z_FAR; t.x = (Math.random() < .5 ? -1 : 1) * (5.4 + Math.random() * 5); t.s = .7 + Math.random() * .9; } }
   for (let i = gifts.length - 1; i >= 0; i--) {
@@ -338,6 +372,7 @@ function update3d(dt) {
     if (g.z <= Z_PL && Math.abs(g.lane - laneF) < .55) {
       const p = proj(relX(g), Z_PL);
       const val = g.bonus ? 50 : 10; score += val; giftsGot++;
+      if (rec && !REPLAYING && rec.ev.length < 5900) rec.ev.push([recT(), g.bonus ? "b" : "g"]);
       pops.push({ x: p.X, y: p.Y - 40, t: 0, txt: "+" + val, c: g.bonus ? "#ffd75e" : "#9dffb0" });
       burst(p.X, p.Y - 30, g.bonus ? ["#ffd75e", "#fff3b0", "#ffb347"] : ["#ff5d5d", "#ffd75e", "#7ec8ff"]);
       sfx(g.bonus ? [1046, 1318, 1568, 2093] : [880, 1318], .07, "square", .14);
@@ -462,6 +497,7 @@ function toggleDebug(force) {
 const canHit = () => player.inv <= 0 && !(debug.on && debug.inv);
 function takeHit() {
   player.inv = 1.6; shakeT = 0.35;
+  if (rec && !REPLAYING && rec.ev.length < 5900) rec.ev.push([recT(), "h"]);
   if (debug.on && debug.inflives) { dlog("hit! (∞ жизни)"); return; }
   lives--;
   if (debug.on) dlog("hit, lives=" + lives);
@@ -511,7 +547,7 @@ addEventListener("keydown", e => {
   if (e.target && e.target.tagName === "INPUT") return;   // не мешать вводу имени
   if (["ArrowLeft", "ArrowRight", "a", "d", "A", "D", " "].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
-  if (state === "play" && mode3d && !e.repeat) {
+  if (state === "play" && mode3d && !e.repeat && !REPLAYING) {
     const k = e.key.toLowerCase();
     if (k === "arrowleft" || k === "a") changeLane(-1);
     if (k === "arrowright" || k === "d") changeLane(1);
@@ -539,10 +575,10 @@ function pointerX(e) {
   return ((e.touches ? e.touches[0].clientX : e.clientX) - r.left) / scale;
 }
 let pdX = 0;
-cv.addEventListener("pointerdown", e => { pdX = pointerX(e); if (state === "play" && !mode3d) player.tx = pdX; });
-cv.addEventListener("pointermove", e => { if (state === "play" && !mode3d && (e.buttons || e.pointerType === "touch")) player.tx = pointerX(e); });
+cv.addEventListener("pointerdown", e => { pdX = pointerX(e); if (state === "play" && !mode3d && !REPLAYING) player.tx = pdX; });
+cv.addEventListener("pointermove", e => { if (state === "play" && !mode3d && !REPLAYING && (e.buttons || e.pointerType === "touch")) player.tx = pointerX(e); });
 cv.addEventListener("pointerup", e => {
-  if (state !== "play" || !mode3d) return;
+  if (state !== "play" || !mode3d || REPLAYING) return;
   const x = pointerX(e), d = x - pdX;
   if (Math.abs(d) > 24) changeLane(d > 0 ? 1 : -1);          // свайп
   else changeLane(x < W / 2 ? -1 : 1);                        // тап по половине экрана
@@ -569,7 +605,7 @@ function update(dt) {
 
   // 3D-зоны: каждую вторую минуту (60-120с, 180-240с...)
   mode3d = time >= 60 && Math.floor(time / 60) % 2 === 1;
-  if (debug.on && debug.force3d !== "auto") mode3d = debug.force3d === "on";
+  if (debug.on && debug.force3d !== "auto" && !REPLAYING) mode3d = debug.force3d === "on";
   if (mode3d !== was3d) {
     was3d = mode3d; bannerT = 2.4; gifts = []; snow = []; tGift = .5; tSnow = 1.2;
     bannerTxt = mode3d ? "🌀 3D-ЗОНА! Полосы: ← →" : "❄ Снова вид сверху!";
@@ -589,14 +625,25 @@ function update(dt) {
 
 function update2d(dt) {
   // движение
-  const kl = keys["arrowleft"] || keys["a"], kr = keys["arrowright"] || keys["d"];
-  if (kl || kr) player.tx += ((kr ? 1 : 0) - (kl ? 1 : 0)) * 560 * diff() * dt;
+  if (REPLAYING && scripted) {
+    const ins = scripted.data.inputs;
+    while (scripted.ptr < ins.length - 1 && ins[scripted.ptr + 1][0] <= time) scripted.ptr++;
+    player.tx = ins[scripted.ptr][1];
+  } else {
+    const kl = keys["arrowleft"] || keys["a"], kr = keys["arrowright"] || keys["d"];
+    if (kl || kr) player.tx += ((kr ? 1 : 0) - (kl ? 1 : 0)) * 560 * diff() * dt;
+  }
   player.tx = Math.max(40, Math.min(W - 40, player.tx));
   player.x += (player.tx - player.x) * Math.min(1, dt * 14);
+  if (rec && !REPLAYING && rec.inputs.length < 5900 && time - rec.lastT >= 0.05 &&
+      (Math.abs(player.tx - rec.lastV) > 6 || time - rec.lastT > 4)) {
+    rec.lastV = player.tx; rec.lastT = time;
+    rec.inputs.push([recT(), Math.round(player.tx)]);
+  }
 
   // спавн — чаще со временем
   tGift -= dt; if (tGift <= 0) { spawnGift(); tGift = Math.max(0.28, 0.8 - time / 150); }
-  tSnow -= dt; if (tSnow <= 0) { spawnSnow(); if (diff() > 1.8 && Math.random() < 0.35) spawnSnow(); tSnow = Math.max(0.16, 0.55 - time / 240); }
+  tSnow -= dt; if (tSnow <= 0) { spawnSnow(); if (diff() > 1.8 && rng() < 0.35) spawnSnow(); tSnow = Math.max(0.16, 0.55 - time / 240); }
 
   // подарки
   for (let i = gifts.length - 1; i >= 0; i--) {
@@ -606,6 +653,7 @@ function update2d(dt) {
     if (d < g.r + player.r * 0.75) {
       const val = g.bonus ? 50 : 10;
       score += val; giftsGot++;
+      if (rec && !REPLAYING && rec.ev.length < 5900) rec.ev.push([recT(), g.bonus ? "b" : "g"]);
       pops.push({ x: g.x, y: g.y, t: 0, txt: "+" + val, c: g.bonus ? "#ffd75e" : "#9dffb0" });
       burst(g.x, g.y, g.bonus ? ["#ffd75e", "#fff3b0", "#ffb347"] : ["#ff5d5d", "#ffd75e", "#7ec8ff"]);
       sfx(g.bonus ? [1046, 1318, 1568, 2093] : [880, 1318], 0.07, "square", 0.14);
@@ -632,11 +680,28 @@ function gameOver() {
   state = "over";
   if (debug.on) dlog("GAME OVER score=" + score + " (t=" + time.toFixed(0) + "с)");
   sfx([660, 550, 440, 330, 262], 0.16, "triangle", 0.2);
+  if (REPLAYING) {
+    // конец воспроизведения: сверяем пересчитанный результат с записанным
+    // (учёт на квантование inputs 20Гц: точное равенство — идеально, ±8% — ок)
+    document.getElementById("saveArea").classList.add("hidden");
+    const okExact = scripted && score === scripted.target;
+    const okNear = scripted && Math.abs(score - scripted.target) <= Math.max(30, scripted.target * 0.08);
+    document.getElementById("finalScore").textContent = "Очки в реплее: " + score;
+    const rl = document.getElementById("recordLine");
+    rl.textContent = "📼 " + (scripted ? scripted.name : "") + " — записано " + (scripted ? scripted.target : "?");
+    rl.style.color = okExact || okNear ? "#9dffb0" : "#ff6b6b";
+    document.getElementById("statsLine").textContent = okExact
+      ? "✓ Реплей воспроизвёл результат один-в-один"
+      : okNear ? "✓ Результат сошёлся в пределах погрешности записи"
+      : "⚠ Расхождение: реплей не воспроизводит очки — возможен чит";
+    document.getElementById("over").classList.remove("hidden");
+    return;
+  }
   const prevHigh = +(localStorage.getItem("xmasHigh") || 0);
-  const rec = score > prevHigh;
-  if (rec) localStorage.setItem("xmasHigh", score);
+  const isRec = score > prevHigh;
+  if (isRec) localStorage.setItem("xmasHigh", score);
   document.getElementById("finalScore").textContent = "Счёт: " + score;
-  document.getElementById("recordLine").textContent = rec ? "🎉 Личный рекорд!" : "🏆 Ваш рекорд: " + prevHigh;
+  document.getElementById("recordLine").textContent = isRec ? "🎉 Личный рекорд!" : "🏆 Ваш рекорд: " + prevHigh;
   document.getElementById("statsLine").textContent = "Подарков собрано: " + giftsGot + " · Время: " + Math.floor(time) + " с";
   // окно добавления имени в общую таблицу
   savedThisRound = false; myKey = "";
@@ -729,6 +794,10 @@ function draw() {
     let h = ""; for (let i = 0; i < 3; i++) h += i < lives ? "❤️ " : "🖤 ";
     ctx.fillText(h, W - 14, 34);
   }
+  if (REPLAYING && scripted && state !== "menu") {
+    ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,215,94,.95)"; ctx.font = "bold 16px Arial";
+    ctx.fillText("📼 РЕПЛЕЙ: " + scripted.name + " — " + scripted.target, W / 2, 94);
+  }
   if (debug.on) {
     ctx.textAlign = "left"; ctx.font = "12px Consolas, monospace"; ctx.fillStyle = "#7ffa9a";
     ctx.fillText("DEV fps:" + debug.fps + " t:" + time.toFixed(1) + "с " + (mode3d ? "3D" : "2D") +
@@ -772,34 +841,92 @@ function draw() {
   ctx.restore();
 }
 
-/* ---------- цикл ---------- */
-let last = performance.now();
+/* ---------- цикл ----------
+   Физика шагами по 1/60с (аккумулятор): симуляция зависит только от
+   seed + inputs, поэтому реплей воспроизводится одинаково на любом
+   железе иFPS. */
+const FIXED = 1 / 60;
+let last = performance.now(), acc = 0;
 function frame(now) {
-  const rawdt = Math.min(0.05, (now - last) / 1000); last = now;
+  let rawdt = (now - last) / 1000; last = now;
+  if (rawdt > 0.25) rawdt = 0.25;
   if (debug.on && rawdt > 0) debug.fps = Math.round(debug.fps ? debug.fps * 0.92 + (1 / rawdt) * 0.08 : 1 / rawdt);
-  update(rawdt * (debug.on && debug.slow ? 0.25 : 1));
+  acc += rawdt * (debug.on && debug.slow ? 0.25 : 1);
+  let n = 0;
+  while (acc >= FIXED && n < 8) { update(FIXED); acc -= FIXED; n++; }
+  if (n >= 8) acc = 0;
   draw();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
 /* ---------- кнопки ---------- */
-function startGame() {
+let starting = false;
+async function startGame() {
+  if (starting) return;
+  starting = true;
+  const sb = document.getElementById("startBtn"), ab = document.getElementById("againBtn");
+  sb.disabled = true; ab.disabled = true; ab.textContent = "⏳";
+  round = null;
+  if (SB) {
+    // регистрируем раунд на сервере: получаем id + seed для детерминированной
+    // симуляции. Без roundId submit-score отклонит результат.
+    try {
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 5000);
+      const r = await fetch(SUPABASE_URL + "/functions/v1/start-round", { method: "POST", headers: sbH, body: "{}", signal: ctl.signal });
+      clearTimeout(to);
+      if (r.ok) round = await r.json();
+      dlog(round ? "round ok, seed=" + round.seed : "round FAIL http " + r.status);
+    } catch (e) { dlog("round сеть: " + e.message); }
+  }
   reset(); state = "play";
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("over").classList.add("hidden");
   document.getElementById("saveArea").classList.add("hidden");
   document.getElementById("sndBtn").classList.remove("hidden");
+  sb.disabled = false; ab.disabled = false; if (!REPLAYING) ab.textContent = "▶ Играть снова";
   startMusic();
+  starting = false;
 }
 document.getElementById("startBtn").onclick = startGame;
 document.getElementById("againBtn").onclick = startGame;
 document.getElementById("saveBtn").onclick = () => submitScore(document.getElementById("nameInput").value);
 document.getElementById("sndBtn").onclick = () => setMusic(!musicOn);
 addEventListener("visibilitychange", () => { if (document.hidden && state === "play") state = "pause"; });
-loadBoard(); // таблица рекордов при запуске
+
+/* ---------- просмотр реплеев ---------- */
+function openReplay(id) { location.href = "?replay=" + encodeURIComponent(id); }
+async function enterReplay(id) {
+  const box = document.getElementById("menuBoard");
+  box.innerHTML = '<div class="bEmpty">⏳ Загружаю реплей…</div>';
+  try {
+    const r = await fetch(SUPABASE_URL + "/rest/v1/scores?select=name,score,replay&id=eq." + encodeURIComponent(id), { headers: sbH });
+    const rows = r.ok ? await r.json() : [];
+    if (!rows.length || !rows[0].replay) throw new Error("not found");
+    scripted = { data: JSON.parse(rows[0].replay), name: rows[0].name, target: rows[0].score, ptr: 0 };
+    REPLAYING = true; round = null;
+    reset();
+    seed0 = (scripted.data.seed || 0) >>> 0; rng = mulberry32(seed0);
+    rec = null;
+    state = "play";
+    document.getElementById("menu").classList.add("hidden");
+    document.getElementById("sndBtn").classList.remove("hidden");
+    const ab = document.getElementById("againBtn");
+    ab.textContent = "⬅ В меню"; ab.onclick = () => { location.href = location.pathname; };
+    dlog("replay start: " + rows[0].name + " = " + rows[0].score);
+    startMusic();
+  } catch (e) {
+    box.innerHTML = '<div class="bEmpty">Реплей не найден 😕</div>';
+    loadBoard();
+  }
+}
+
+const qReplay = new URLSearchParams(location.search).get("replay");
+if (!qReplay) loadBoard(); // таблица рекордов при запуске
 wireDev();
 if (debug.on) document.getElementById("dev").classList.remove("hidden");
+if (qReplay) enterReplay(qReplay);
 </script>
 </body>
 </html>
