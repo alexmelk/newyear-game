@@ -468,7 +468,7 @@ export class GameEngine {
     }
   }
   drawSanta(s: number) {
-    // игрок — эмодзи Деда Мороза БЕЗ свечения; «ярче» сделано размером (см. вызовы)
+    // игрок — эмодзи Деда Мороза: без свечения, стандартный размер (как в v2.0.3)
     const ctx = this.ctx;
     ctx.save(); ctx.scale(s, s);
     ctx.font = "80px " + this.EMOJI_FONT;
@@ -551,7 +551,7 @@ export class GameEngine {
     const blink = this.player.inv > 0 && Math.floor(this.player.inv * 10) % 2 === 0;
     ctx.globalAlpha = blink ? .45 : 1;
     ctx.save(); ctx.translate(W / 2, py); ctx.rotate((this.lane - this.laneF) * .35);
-    this.drawSanta(1.9);
+    this.drawSanta(1.6);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -603,7 +603,7 @@ export class GameEngine {
         const blink = this.player.inv > 0 && Math.floor(this.player.inv * 10) % 2 === 0;
         ctx.globalAlpha = blink ? 0.45 : 1;
         ctx.save(); ctx.translate(this.player.x, this.player.y); ctx.rotate((this.player.tx - this.player.x) * 0.002);
-        this.drawSanta(1.05);
+        this.drawSanta(0.85);
         ctx.restore();
         ctx.globalAlpha = 1;
       }
