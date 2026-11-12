@@ -23,7 +23,8 @@
   .hidden{display:none!important}
   #sndBtn{position:absolute;right:12px;top:12px;z-index:11}
   #exitRep{position:absolute;right:12px;bottom:12px;z-index:11}
-  #dev{position:absolute;left:8px;bottom:8px;z-index:12;width:246px;background:rgba(6,10,26,.9);
+  #repCheat{position:absolute;right:12px;bottom:56px;z-index:11}
+  #dev{position:absolute;left:8px;bottom:8px;z-index:9;width:246px;background:rgba(6,10,26,.9);
     border:1px solid #3a4a7a;border-radius:10px;padding:9px;color:#9ff;font:11px Consolas,monospace}
   #devHead{display:flex;justify-content:space-between;align-items:center;font-weight:bold;color:#ffd75e;margin-bottom:6px;font-size:12px}
   #devHead button{padding:1px 7px;font-size:12px;background:rgba(255,255,255,.12);color:#cfd8ff}
@@ -33,6 +34,9 @@
   .devBtns button.on{background:#2b6d36;color:#b9f7c5}
   #devInfo{color:#8fa0d8;margin-bottom:4px;white-space:pre-wrap}
   #devLog{max-height:92px;overflow-y:auto;color:#7ffa9a;white-space:pre-wrap}
+  #errBar{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:30;display:none;
+    background:rgba(150,25,25,.92);color:#ffd7d7;padding:7px 14px;border-radius:9px;
+    font:13px Arial;max-width:92%;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.5)}
   .score-line{font-size:26px;margin:8px 0 2px;color:#fff}
   .record{font-size:15px;color:#ffd75e;margin-bottom:14px}
   .bTitle{font-size:16px;font-weight:700;color:#fff;margin:16px 0 6px}
@@ -86,9 +90,10 @@
 
   <button id="sndBtn" class="mini hidden">🔊 Музыка</button>
   <button id="exitRep" class="mini hidden">✕ Выйти из реплея</button>
+  <button id="repCheat" class="mini hidden">🚨 Читер!</button>
 
   <div id="dev" class="hidden">
-    <div id="devHead">🛠 Режим разработчика (F2) <button id="devHide">✕</button></div>
+    <div id="devHead">🛠 Режим разработчика (F2, пароль) <button id="devHide">✕</button></div>
     <div class="devBtns">
       <button id="dInv">🛡 неуязв. (I)</button>
       <button id="dLives">∞ жизни</button>
@@ -480,7 +485,8 @@ function draw3dItems() {
 
 /* ======================= dev mode ======================= */
 const debug = {
-  on: /(\?|&)debug=1/.test(location.search) || location.hash === "#dev" || localStorage.getItem("xmasDebug") === "1",
+  on: false,
+  armed: /(\?|&)debug=1/.test(location.search) || location.hash === "#dev",
   inv: false, inflives: false, slow: false, boxes: false,
   force3d: "auto",       // auto | on | off
   fps: 0, log: []
@@ -491,9 +497,33 @@ function dlog(msg) {
   if (debug.log.length > 12) debug.log.shift();
   const el = document.getElementById("devLog"); if (el) el.textContent = debug.log.join("\n");
 }
-function toggleDebug(force) {
+// плашка ошибки: раньше любое исключение в кадре обрывало цикл rAF —
+// экран «замирал» без каких-либо признаков проблемы
+function errBar(msg) {
+  try { dlog("ERR " + msg); } catch (_) {}
+  let el = document.getElementById("errBar");
+  if (!el) { el = document.createElement("div"); el.id = "errBar"; document.getElementById("wrap").appendChild(el); }
+  el.textContent = "⚠ " + String(msg).slice(0, 120);
+  el.style.display = "block";
+  clearTimeout(el._t); el._t = setTimeout(() => { el.style.display = "none"; }, 8000);
+}
+addEventListener("error", ev => errBar(ev.message || "JS error"));
+async function toggleDebug(force) {
+  // включение — только после проверки пароля администратора на сервере;
+  // в рамках одной вкладки спрашиваем один раз (sessionStorage)
+  if (!debug.on && !sessionStorage.getItem("xmasDevAuth")) {
+    const p = window.prompt("🛠 Меню разработчика защищено.\nВведите пароль администратора:");
+    if (p === null) return;
+    try {
+      const r = await fetch(SUPABASE_URL + "/functions/v1/admin", {
+        method: "POST", headers: { ...sbH, "x-admin-pass": p },
+        body: JSON.stringify({ action: "dev" })
+      });
+      if (!r.ok) { window.alert("Неверный пароль ❌"); return; }
+      sessionStorage.setItem("xmasDevAuth", "1");
+    } catch (e) { window.alert("Нет связи с сервером — пароль не проверить 😕"); return; }
+  }
   debug.on = (force === undefined) ? !debug.on : !!force;
-  localStorage.setItem("xmasDebug", debug.on ? "1" : "0");
   document.getElementById("dev").classList.toggle("hidden", !debug.on);
   if (debug.on) dlog("dev panel ON — F2 выключить");
 }
@@ -870,12 +900,17 @@ let last = performance.now(), acc = 0;
 function frame(now) {
   let rawdt = (now - last) / 1000; last = now;
   if (rawdt > 0.25) rawdt = 0.25;
-  if (debug.on && rawdt > 0) debug.fps = Math.round(debug.fps ? debug.fps * 0.92 + (1 / rawdt) * 0.08 : 1 / rawdt);
-  acc += rawdt * (debug.on && debug.slow ? 0.25 : 1);
-  let n = 0;
-  while (acc >= FIXED && n < 8) { update(FIXED); acc -= FIXED; n++; }
-  if (n >= 8) acc = 0;
-  draw();
+  try {
+    if (debug.on && rawdt > 0) debug.fps = Math.round(debug.fps ? debug.fps * 0.92 + (1 / rawdt) * 0.08 : 1 / rawdt);
+    acc += rawdt * (debug.on && debug.slow ? 0.25 : 1);
+    let n = 0;
+    while (acc >= FIXED && n < 8) { update(FIXED); acc -= FIXED; n++; }
+    if (n >= 8) acc = 0;
+    draw();
+  } catch (e) {
+    acc = 0;
+    errBar((e && e.message) || e);   // цикл не обрываем — игра живёт дальше
+  }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -887,33 +922,53 @@ async function startGame() {
   starting = true;
   const sb = document.getElementById("startBtn"), ab = document.getElementById("againBtn");
   sb.disabled = true; ab.disabled = true; ab.textContent = "⏳";
-  round = null;
-  if (SB) {
-    // регистрируем раунд на сервере: получаем id + seed для детерминированной
-    // симуляции. Без roundId submit-score отклонит результат.
-    try {
-      const ctl = new AbortController();
-      const to = setTimeout(() => ctl.abort(), 5000);
-      const r = await fetch(SUPABASE_URL + "/functions/v1/start-round", { method: "POST", headers: sbH, body: "{}", signal: ctl.signal });
-      clearTimeout(to);
-      if (r.ok) round = await r.json();
-      dlog(round ? "round ok, seed=" + round.seed : "round FAIL http " + r.status);
-    } catch (e) { dlog("round сеть: " + e.message); }
+  try {
+    round = null;
+    if (SB) {
+      // регистрируем раунд на сервере: получаем id + seed для детерминированной
+      // симуляции. Без roundId submit-score отклонит результат.
+      try {
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), 5000);
+        const r = await fetch(SUPABASE_URL + "/functions/v1/start-round", { method: "POST", headers: sbH, body: "{}", signal: ctl.signal });
+        clearTimeout(to);
+        if (r.ok) round = await r.json();
+        dlog(round ? "round ok, seed=" + round.seed : "round FAIL http " + r.status);
+      } catch (e) { dlog("round сеть: " + e.message); }
+    }
+    reset(); state = "play";
+    document.getElementById("menu").classList.add("hidden");
+    document.getElementById("over").classList.add("hidden");
+    document.getElementById("saveArea").classList.add("hidden");
+    document.getElementById("sndBtn").classList.remove("hidden");
+    try { startMusic(); } catch (e) { dlog("music fail: " + e.message); }
+  } catch (e) {
+    errBar((e && e.message) || e);
+  } finally {
+    // кнопки всегда возвращаем в рабочее состояние, иначе старт «залипает»
+    sb.disabled = false; ab.disabled = false; if (!REPLAYING) ab.textContent = "▶ Играть снова";
+    starting = false;
   }
-  reset(); state = "play";
-  document.getElementById("menu").classList.add("hidden");
-  document.getElementById("over").classList.add("hidden");
-  document.getElementById("saveArea").classList.add("hidden");
-  document.getElementById("sndBtn").classList.remove("hidden");
-  sb.disabled = false; ab.disabled = false; if (!REPLAYING) ab.textContent = "▶ Играть снова";
-  startMusic();
-  starting = false;
 }
 document.getElementById("startBtn").onclick = startGame;
 document.getElementById("againBtn").onclick = startGame;
 document.getElementById("saveBtn").onclick = () => submitScore(document.getElementById("nameInput").value);
 document.getElementById("sndBtn").onclick = () => setMusic(!musicOn);
 document.getElementById("exitRep").onclick = exitReplay;
+document.getElementById("repCheat").onclick = async () => {
+  const b = document.getElementById("repCheat");
+  if (!b.dataset.id || !SB) return;
+  b.disabled = true; b.textContent = "…";
+  try {
+    const r = await fetch(SUPABASE_URL + "/functions/v1/report-replay", {
+      method: "POST", headers: sbH, body: JSON.stringify({ id: b.dataset.id })
+    });
+    if (r.ok) {
+      const j = await r.json().catch(() => null);
+      b.textContent = j && j.reports != null ? "🚨 Учтено (" + j.reports + ")" : "🚨 Жалоба учтена";
+    } else { b.disabled = false; b.textContent = "🚨 Читер!"; }
+  } catch (e) { b.disabled = false; b.textContent = "🚨 Читер!"; }
+};
 addEventListener("visibilitychange", () => { if (document.hidden && state === "play") state = "pause"; });
 
 /* ---------- просмотр реплеев ---------- */
@@ -925,6 +980,7 @@ function exitReplay() {
   document.getElementById("over").classList.add("hidden");
   document.getElementById("menu").classList.remove("hidden");
   document.getElementById("exitRep").classList.add("hidden");
+  document.getElementById("repCheat").classList.add("hidden");
   const ab = document.getElementById("againBtn");
   ab.textContent = "▶ Играть снова"; ab.onclick = startGame;
   loadBoard();
@@ -945,6 +1001,9 @@ async function enterReplay(id) {
     document.getElementById("menu").classList.add("hidden");
     document.getElementById("sndBtn").classList.remove("hidden");
     document.getElementById("exitRep").classList.remove("hidden");
+    const rc = document.getElementById("repCheat");
+    rc.dataset.id = id; rc.disabled = false; rc.textContent = "🚨 Читер!";
+    rc.classList.remove("hidden");
     const ab = document.getElementById("againBtn");
     ab.textContent = "⬅ В меню"; ab.onclick = exitReplay;
     dlog("replay start: " + rows[0].name + " = " + rows[0].score);
@@ -958,7 +1017,7 @@ async function enterReplay(id) {
 const qReplay = new URLSearchParams(location.search).get("replay");
 if (!qReplay) loadBoard(); // таблица рекордов при запуске
 wireDev();
-if (debug.on) document.getElementById("dev").classList.remove("hidden");
+if (debug.armed) toggleDebug(true);   // ?debug=1 теперь тоже требует пароль
 if (qReplay) enterReplay(qReplay);
 </script>
 </body>
