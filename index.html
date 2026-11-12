@@ -22,6 +22,7 @@
   .mini{padding:8px 16px;font-size:14px;font-weight:400;color:#cfd8ff;background:rgba(255,255,255,.1);box-shadow:none}
   .hidden{display:none!important}
   #sndBtn{position:absolute;right:12px;top:12px;z-index:11}
+  #exitRep{position:absolute;right:12px;bottom:12px;z-index:11}
   #dev{position:absolute;left:8px;bottom:8px;z-index:12;width:246px;background:rgba(6,10,26,.9);
     border:1px solid #3a4a7a;border-radius:10px;padding:9px;color:#9ff;font:11px Consolas,monospace}
   #devHead{display:flex;justify-content:space-between;align-items:center;font-weight:bold;color:#ffd75e;margin-bottom:6px;font-size:12px}
@@ -84,6 +85,7 @@
   </div>
 
   <button id="sndBtn" class="mini hidden">🔊 Музыка</button>
+  <button id="exitRep" class="mini hidden">✕ Выйти из реплея</button>
 
   <div id="dev" class="hidden">
     <div id="devHead">🛠 Режим разработчика (F2) <button id="devHide">✕</button></div>
@@ -545,6 +547,7 @@ function wireDev() {
 let keys = {};
 addEventListener("keydown", e => {
   if (e.target && e.target.tagName === "INPUT") return;   // не мешать вводу имени
+  if (e.key === "Escape" && REPLAYING) { exitReplay(); return; }
   if (["ArrowLeft", "ArrowRight", "a", "d", "A", "D", " "].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
   if (state === "play" && mode3d && !e.repeat && !REPLAYING) {
@@ -893,10 +896,22 @@ document.getElementById("startBtn").onclick = startGame;
 document.getElementById("againBtn").onclick = startGame;
 document.getElementById("saveBtn").onclick = () => submitScore(document.getElementById("nameInput").value);
 document.getElementById("sndBtn").onclick = () => setMusic(!musicOn);
+document.getElementById("exitRep").onclick = exitReplay;
 addEventListener("visibilitychange", () => { if (document.hidden && state === "play") state = "pause"; });
 
 /* ---------- просмотр реплеев ---------- */
 function openReplay(id) { location.href = "?replay=" + encodeURIComponent(id); }
+function exitReplay() {
+  REPLAYING = false; scripted = null; round = null; rec = null;
+  reset();
+  state = "menu";
+  document.getElementById("over").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+  document.getElementById("exitRep").classList.add("hidden");
+  const ab = document.getElementById("againBtn");
+  ab.textContent = "▶ Играть снова"; ab.onclick = startGame;
+  loadBoard();
+}
 async function enterReplay(id) {
   const box = document.getElementById("menuBoard");
   box.innerHTML = '<div class="bEmpty">⏳ Загружаю реплей…</div>';
@@ -912,8 +927,9 @@ async function enterReplay(id) {
     state = "play";
     document.getElementById("menu").classList.add("hidden");
     document.getElementById("sndBtn").classList.remove("hidden");
+    document.getElementById("exitRep").classList.remove("hidden");
     const ab = document.getElementById("againBtn");
-    ab.textContent = "⬅ В меню"; ab.onclick = () => { location.href = location.pathname; };
+    ab.textContent = "⬅ В меню"; ab.onclick = exitReplay;
     dlog("replay start: " + rows[0].name + " = " + rows[0].score);
     startMusic();
   } catch (e) {
