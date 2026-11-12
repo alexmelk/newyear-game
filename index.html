@@ -66,7 +66,7 @@
     <button id="startBtn">▶ Начать игру</button>
     <div class="bTitle">🏆 Таблица рекордов</div>
     <div class="board" id="menuBoard"></div>
-    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза<br>С 60-й секунды начинаются 🌀 3D-зоны: переключай полосы!<br>▶ у топ-3 рекордов — можно посмотреть реплей игрока</div>
+    <div class="small">Управление: ← → / A D / мышь / палец · P — пауза<br>С 60-й секунды бывают 🌀 3D-зоны — перед сменой идёт 3-секундный отсчёт!<br>▶ у топ-3 рекордов — можно посмотреть реплей игрока</div>
   </div>
 
   <div id="over" class="overlay hidden">
@@ -285,14 +285,14 @@ function renderBoards() {
 function makeBack() {
   trees = []; flakes = [];
   for (let i = 0; i < 9; i++) trees.push({ x: Math.random() * W, y: Math.random() * H, s: 0.5 + Math.random() * 0.7 });
-  for (let i = 0; i < 70; i++) flakes.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.5, v: 25 + Math.random() * 55, p: Math.random() * 6.28 });
+  for (let i = 0; i < 70; i++) flakes.push({ x: Math.random() * W, y: Math.random() * H, r: 0.7 + Math.random() * 1.5, v: 25 + Math.random() * 55, p: Math.random() * 6.28 });
 }
 function reset() {
   time = 0; score = 0; giftsGot = 0; lives = 3; shakeT = 0;
   player = { x: W / 2, tx: W / 2, y: H - 110, r: 38, inv: 0 };
   gifts = []; snow = []; parts = []; pops = [];
   tGift = 0.6; tSnow = 1.4;
-  mode3d = was3d = false; lane = laneF = 0; bannerT = 0; zoff = 0;
+  mode3d = was3d = false; lane = laneF = 0; prepT = 0; zoff = 0;
   seed0 = (round ? round.seed : Math.random() * 4294967296) >>> 0;
   rng = mulberry32(seed0);
   if (!REPLAYING) rec = { v: 1, seed: seed0, dur: 0, inputs: [[0, Math.round(W / 2)]], ev: [], lastV: W / 2, lastT: 0 };
@@ -339,7 +339,7 @@ function burst(x, y, colors) {
 /* ======================= 3D-зоны ======================= */
 /* Каждую вторую минуту (60-120с, 180-240с...) игра становится 3D-бегунком:
    перспектива, 3 полосы, предметы летят из глубины экрана на камеру. */
-let mode3d = false, was3d = false, lane = 0, laneF = 0, bannerT = 0, bannerTxt = "", zoff = 0, trees3 = [];
+let mode3d = false, was3d = false, lane = 0, laneF = 0, prepT = 0, zoff = 0, trees3 = [];
 const LANE_W = 3, Z_PL = 2.6, Z_FAR = 100, FOC = 360, HOR = H * 0.40, KY = 990;
 const proj = (xRel, z) => ({ X: W / 2 + xRel * FOC / z, Y: HOR + KY / z, s: FOC / z });
 const fade = z => Math.max(0.05, Math.min(1, (Z_FAR - z) / 45));
@@ -365,8 +365,8 @@ function update3d(dt) {
   laneF += (lane - laneF) * Math.min(1, dt * 9);
   player.x = W / 2; player.tx = W / 2;
   zoff = (zoff + run3() * dt) % 6;
-  tGift -= dt; if (tGift <= 0) { spawn3dGift(); tGift = Math.max(.5, 1.2 - time / 260); }
-  tSnow -= dt; if (tSnow <= 0) { if (snow.length < 8) spawn3dSnow(); if (diff() > 1.8 && rng() < .4 && snow.length < 8) spawn3dSnow(); tSnow = Math.max(.38, .95 - time / 380); }
+  tGift -= dt; if (tGift <= 0 && prepT <= 0) { spawn3dGift(); tGift = Math.max(.5, 1.2 - time / 260); }
+  tSnow -= dt; if (tSnow <= 0 && prepT <= 0) { if (snow.length < 8) spawn3dSnow(); if (diff() > 1.8 && rng() < .4 && snow.length < 8) spawn3dSnow(); tSnow = Math.max(.38, .95 - time / 380); }
   const v = run3() * dt;
   for (const t of trees3) { t.z -= v; if (t.z < 1.5) { t.z += Z_FAR; t.x = (Math.random() < .5 ? -1 : 1) * (5.4 + Math.random() * 5); t.s = .7 + Math.random() * .9; } }
   for (let i = gifts.length - 1; i >= 0; i--) {
@@ -459,10 +459,11 @@ function draw3dItems() {
       ctx.save(); ctx.translate(p.X, p.Y - size * .4); ctx.rotate(Math.sin(time * 3 + o.seed) * .2);
       ctx.fillText(o.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
     } else {
-      const r = Math.max(2, Math.min(120, p.s * o.r * .02));
+      const r = Math.max(3.5, Math.min(120, p.s * o.r * .024));
       const rg = ctx.createRadialGradient(p.X - r * .3, p.Y - r * 1.2 - r * .3, r * .2, p.X, p.Y - r * 1.2, r);
-      rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#9db8d8");
+      rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#7ea9d9");
       ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(p.X, p.Y - r * 1.2, r, 0, 6.29); ctx.fill();
+      ctx.strokeStyle = "rgba(46,88,148,.9)"; ctx.lineWidth = Math.max(1, r * .16); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -604,14 +605,14 @@ function update(dt) {
   time += dt;
   player.inv = Math.max(0, player.inv - dt);
   shakeT = Math.max(0, shakeT - dt);
-  bannerT = Math.max(0, bannerT - dt);
+  prepT = Math.max(0, prepT - dt);
 
   // 3D-зоны: каждую вторую минуту (60-120с, 180-240с...)
   mode3d = time >= 60 && Math.floor(time / 60) % 2 === 1;
   if (debug.on && debug.force3d !== "auto" && !REPLAYING) mode3d = debug.force3d === "on";
   if (mode3d !== was3d) {
-    was3d = mode3d; bannerT = 2.4; gifts = []; snow = []; tGift = .5; tSnow = 1.2;
-    bannerTxt = mode3d ? "🌀 3D-ЗОНА! Полосы: ← →" : "❄ Снова вид сверху!";
+    // смена режима: 3 секунды подготовки — предметы не спавнятся, игроку можно двигаться
+    was3d = mode3d; prepT = 3; gifts = []; snow = []; tGift = .5; tSnow = 1.2;
     if (mode3d) makeTrees3();
     else { player.tx = W / 2; }
   }
@@ -644,9 +645,9 @@ function update2d(dt) {
     rec.inputs.push([recT(), Math.round(player.tx)]);
   }
 
-  // спавн — чаще со временем
-  tGift -= dt; if (tGift <= 0) { spawnGift(); tGift = Math.max(0.28, 0.8 - time / 150); }
-  tSnow -= dt; if (tSnow <= 0) { spawnSnow(); if (diff() > 1.8 && rng() < 0.35) spawnSnow(); tSnow = Math.max(0.16, 0.55 - time / 240); }
+  // спавн — чаще со временем (после 3с подготовки к режиму)
+  tGift -= dt; if (tGift <= 0 && prepT <= 0) { spawnGift(); tGift = Math.max(0.28, 0.8 - time / 150); }
+  tSnow -= dt; if (tSnow <= 0 && prepT <= 0) { spawnSnow(); if (diff() > 1.8 && rng() < 0.35) spawnSnow(); tSnow = Math.max(0.16, 0.55 - time / 240); }
 
   // подарки
   for (let i = gifts.length - 1; i >= 0; i--) {
@@ -743,8 +744,8 @@ function draw() {
   ctx.fillStyle = "rgba(245,240,200,.12)"; ctx.beginPath(); ctx.arc(W - 70, 80, 48, 0, 6.29); ctx.fill();
 
   if (mode3d) draw3dGround(); else for (const t of trees) drawTree(t);
-  // снег
-  ctx.fillStyle = "rgba(255,255,255,.85)";
+  // снег фоновый: мелкие бледно-голубые точки — нарочно не путать с снежками-врагами
+  ctx.fillStyle = mode3d ? "rgba(200,222,255,.3)" : "rgba(205,225,255,.45)";
   for (const f of flakes) { ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, 6.29); ctx.fill(); }
 
   if (state !== "menu") {
@@ -758,12 +759,13 @@ function draw() {
         ctx.font = (g.bonus ? 42 : 44) + "px " + EMOJI_FONT;
         ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
       }
-      // снежки
+      // снежки — крупные, с синей каймой: сразу отличаются от фоновых точек
       for (const s of snow) {
         const x = s.x + Math.sin(s.p) * s.amp;
         const rg = ctx.createRadialGradient(x - s.r * .3, s.y - s.r * .3, s.r * .2, x, s.y, s.r);
-        rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#9db8d8");
+        rg.addColorStop(0, "#ffffff"); rg.addColorStop(1, "#7ea9d9");
         ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, 6.29); ctx.fill();
+        ctx.strokeStyle = "rgba(46,88,148,.9)"; ctx.lineWidth = 2.5; ctx.stroke();
         ctx.fillStyle = "rgba(255,255,255,.35)";
         ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
       }
@@ -817,7 +819,7 @@ function draw() {
         const yN = HOR + KY / Z_PL;
         ctx.beginPath(); ctx.moveTo(0, yN - 60); ctx.lineTo(W, yN - 60); ctx.stroke();
         ctx.strokeStyle = "rgba(255,90,90,.95)";
-        for (const s of snow) { const p = proj(relX(s), Math.max(1.3, s.z)); ctx.beginPath(); ctx.arc(p.X, p.Y - Math.max(2, p.s * s.r * .02) * 1.2, Math.max(2, p.s * s.r * .02), 0, 6.29); ctx.stroke(); }
+        for (const s of snow) { const p = proj(relX(s), Math.max(1.3, s.z)); const rr = Math.max(3.5, p.s * s.r * .024); ctx.beginPath(); ctx.arc(p.X, p.Y - rr * 1.2, rr, 0, 6.29); ctx.stroke(); }
         ctx.strokeStyle = "rgba(0,255,120,.8)";
         for (const g of gifts) { const p = proj(relX(g), Math.max(1.3, g.z)); ctx.beginPath(); ctx.arc(p.X, p.Y - p.s * .3, Math.max(3, p.s * .4), 0, 6.29); ctx.stroke(); }
       } else {
@@ -828,10 +830,16 @@ function draw() {
       }
     }
   }
-  if (state === "play" && bannerT > 0) {
-    ctx.globalAlpha = Math.min(1, bannerT);
-    ctx.textAlign = "center"; ctx.fillStyle = "#ffd75e"; ctx.font = "bold 40px Arial";
-    ctx.fillText(bannerTxt, W / 2, H * 0.30);
+  if (state === "play" && prepT > 0) {
+    // обратный отсчёт смены режима: 3 → 1
+    const n = Math.ceil(prepT), fr = prepT - Math.floor(prepT);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(5,10,30,.62)"; ctx.fillRect(0, H * 0.26, W, 168);
+    ctx.fillStyle = "#ffd75e"; ctx.font = "bold 27px Arial";
+    ctx.fillText(mode3d ? "🌀 Скоро 3D-зона! Полосы: ← →" : "❄ Скоро обычный вид!", W / 2, H * 0.26 + 42);
+    ctx.globalAlpha = 0.3 + 0.7 * fr;
+    ctx.font = "bold 76px Arial";
+    ctx.fillText(n, W / 2, H * 0.26 + 112);
     ctx.globalAlpha = 1;
   }
   if (state === "pause") {
