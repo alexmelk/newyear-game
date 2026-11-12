@@ -467,10 +467,15 @@ export class GameEngine {
       ctx.beginPath(); ctx.moveTo(x, oy - h); ctx.lineTo(x - w, oy + h * 0.4); ctx.lineTo(x + w, oy + h * 0.4); ctx.closePath(); ctx.fill();
     }
   }
-  drawSanta(s: number) {
-    // игрок — эмодзи Деда Мороза, светится как подарки: ореол + тень + двойная отрисовка
+  drawSanta(s: number, inv = 0) {
+    // игрок — эмодзи Деда Мороза, светится как подарки; сразу после столкновения сереет
+    // и постепенно «отходит» (цвет возвращается) по мере окончания неуязвимости
     const ctx = this.ctx;
     ctx.save(); ctx.scale(s, s);
+    if (inv > 0) {
+      const k = Math.min(1, inv / 1.2);   // 1.6..1.2 — полный серый, дальше цвет возвращается
+      ctx.filter = "grayscale(" + Math.round(k * 100) + "%) brightness(" + Math.round(100 - 18 * k) + "%)";
+    }
     const glow = ctx.createRadialGradient(0, 0, 5, 0, 0, 58);
     glow.addColorStop(0, "rgba(255,150,110,.85)");
     glow.addColorStop(.55, "rgba(255,110,90,.32)");
@@ -482,7 +487,7 @@ export class GameEngine {
     ctx.shadowColor = "#ff7a66"; ctx.shadowBlur = 18;
     ctx.fillText("🎅", 0, 0);
     ctx.fillText("🎅", 0, 0);   // двойная отрисовка усиливает свечение (приём из 2D-подарков)
-    ctx.restore();
+    ctx.restore();   // restore сбрасывает и filter, и тень
   }
   draw3dGround() {
     const ctx = this.ctx, W = this.W, H = this.H;
@@ -563,7 +568,7 @@ export class GameEngine {
       rot += (rot >= 0 ? 1 : -1) * 1.4 * fall * fall;
     }
     ctx.rotate(rot);
-    this.drawSanta(1.6);
+    this.drawSanta(1.6, this.player.inv);
     ctx.restore();
   }
 
@@ -618,7 +623,7 @@ export class GameEngine {
           rot += (rot >= 0 ? 1 : -1) * 1.4 * fall * fall;
         }
         ctx.rotate(rot);
-        this.drawSanta(0.85);
+        this.drawSanta(0.85, this.player.inv);
         ctx.restore();
       }
       for (const p of this.parts) {
