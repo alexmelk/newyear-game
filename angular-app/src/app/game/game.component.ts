@@ -35,6 +35,7 @@ import { VERSION, SUPABASE_URL } from "../core/config";
       <div class="small">Управление: ← → / A D / мышь / палец · P — пауза<br>
       С 60-й секунды бывают 🌀 3D-зоны, а дальше по кругу — 🎯 зумба-зона:<br>
       кликай, чтобы стрелять шариками в цепочку — три одинаковых подряд лопаются!<br>
+      ❤️ во всех зонах появляются сердечки здоровья — подбери или подстрели: +1 жизнь (до 5)!<br>
       Перед сменой зоны идёт 3-секундный отсчёт!<br>
       ▶ у топ-3 рекордов — можно посмотреть реплей игрока</div>
     </div>
@@ -104,6 +105,7 @@ import { VERSION, SUPABASE_URL } from "../core/config";
         <button (click)="engine.devSpawnGift()">🎁 спавн (G)</button>
         <button (click)="engine.devSpawnSnow()">❄ спавн (N)</button>
         <button (click)="engine.devClearSnow()">🧹 снежки (X)</button>
+        <button (click)="engine.devSpawnHeart()">❤ сердечко</button>
         <button (click)="devTestBoard()">📡 борд</button>
       </div>
       <div id="devInfo">{{ devInfo }}</div>

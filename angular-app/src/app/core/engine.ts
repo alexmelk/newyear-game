@@ -27,6 +27,7 @@ export class GameEngine {
 
   state = "menu";
   time = 0; score = 0; giftsGot = 0; lives = 3; shakeT = 0;
+  hearts: any[] = []; rngH: any = null; nextHeartT = 0;   // v6: сердечки здоровья (отдельный rng-поток — старые реплеи не сдвигаются)
   player: any = null;
   gifts: any[] = []; snow: any[] = []; parts: any[] = []; pops: any[] = [];
   trees: any[] = []; flakes: any[] = []; tGift = 0; tSnow = 0;
@@ -263,12 +264,14 @@ export class GameEngine {
     this.tGift = 0.6; this.tSnow = 1.4;
     this.mode3d = this.zuma = false; this.wasZone = "2d"; this.zc = null;
     this.lane = this.laneF = 0; this.prepT = 0; this.zoff = 0;
-    this.simV = this.REPLAYING && this.scripted ? Math.min(4, Math.max(1, this.scripted.data.v | 0) || 1) : 4;
+    this.simV = this.REPLAYING && this.scripted ? Math.min(6, Math.max(1, this.scripted.data.v | 0) || 1) : 6;
     this.zPath = this.simV >= 4 ? this.zPathSp : this.zPathS;
     this.zLen = this.simV >= 4 ? this.zLenSp : this.zLenS;
     this.seed0 = (this.round ? this.round.seed : Math.random() * 4294967296) >>> 0;
     this.rng = this.mulberry32(this.seed0);
-    if (!this.REPLAYING) this.rec = { v: 4, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
+    this.rngH = this.mulberry32((this.seed0 ^ 0x5EEDBA7E) >>> 0);
+    this.nextHeartT = 10 + this.rngH() * 10; this.hearts = [];
+    if (!this.REPLAYING) this.rec = { v: 6, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
     this.makeBack();
   }
 
@@ -348,6 +351,68 @@ export class GameEngine {
   }
 
   canHit() { return this.player.inv <= 0 && !(this.debug.on && this.debug.inv); }
+
+  /* ---- сердечки здоровья (v6): бывают во всех зонах, дают +1 жизнь (до 5) ---- */
+  updateHeartSpawns(dt: number) {
+    if (this.prepT > 0 || this.time < this.nextHeartT) return;
+    this.nextHeartT = this.time + 22 + this.rngH() * 14;
+    if (this.hearts.length || this.lives >= 5) return;
+    this.spawnHeart();
+  }
+  spawnHeart() {
+    const r = this.rngH;
+    if (this.zuma) {
+      // сердечко ставится ВПЕРЕДИ головы цепочки (там тропка чиста) — дострелимо или соберётся сама, когда цепочка дойдёт
+      const ch = this.zc ? this.zc.chain : null;
+      const headS = ch && ch.length ? ch[0].s : 0;
+      const hs = Math.min(this.zLen * 0.95, headS + 90 + r() * 160);
+      const p = this.zPos(hs), q = this.zPos(Math.min(this.zLen, hs + 12));
+      const dx = q.x - p.x, dy = q.y - p.y, L2 = Math.hypot(dx, dy) || 1, side = r() < .5 ? -1 : 1;
+      this.hearts.push({ k: "z", x: p.x - dy / L2 * 30 * side, y: p.y + dx / L2 * 30 * side, ttl: 22, seed: r() * 6.28 });
+    } else if (this.mode3d) {
+      this.hearts.push({ k: "3", lane: (r() * 3 | 0) - 1, ox: 0, z: this.Z_FAR, seed: r() * 6.28 });
+    } else {
+      this.hearts.push({ k: "2", x: 40 + r() * (this.W - 80), y: -34, vy: 150 + 25 * this.diff(), p: r() * 6.28 });
+    }
+    if (this.debug.on) this.dlog("❤ сердечко появился");
+  }
+  updateHearts(dt: number) {
+    for (let i = this.hearts.length - 1; i >= 0; i--) {
+      const h = this.hearts[i];
+      if (h.k === "2") {
+        h.y += h.vy * dt; h.p += dt * 2; h.x += Math.sin(h.p) * 18 * dt;
+        if (Math.hypot(h.x - this.player.x, h.y - (this.player.y - 30)) < 44 + this.player.r * .5) this.collectHeart(h, h.x, h.y - 16);
+        else if (h.y > this.H + 40) this.hearts.splice(i, 1);
+      } else if (h.k === "3") {
+        h.z -= this.run3() * dt; h.ox = Math.sin(this.time * 2 + h.seed) * .35;
+        if (h.z <= this.Z_PL && Math.abs(h.lane - this.laneF) < .55) {
+          const p = this.proj(this.relX(h), this.Z_PL); this.collectHeart(h, p.X, p.Y - 60);
+        } else if (h.z < 1) this.hearts.splice(i, 1);
+      } else {
+        h.ttl -= dt;
+        let touch = false;
+        if (this.zc) {
+          for (const p of this.zc.projs) if (Math.hypot(p.x - h.x, p.y - h.y) < 32) { touch = true; break; }
+          if (!touch) for (const b of this.zc.chain) {    // цепочка тоже смахивает сердечко — гарантированно собираемо
+            if (b.s < 0) continue;
+            const q = this.zPos(b.s);
+            if (Math.hypot(q.x - h.x, q.y - h.y) < 30) { touch = true; break; }
+          }
+        }
+        if (touch) this.collectHeart(h, h.x, h.y - 18);
+        else if (h.ttl <= 0) this.hearts.splice(i, 1);
+      }
+    }
+  }
+  collectHeart(h: any, X: number, Y: number) {
+    this.hearts.splice(this.hearts.indexOf(h), 1);
+    this.lives = Math.min(5, this.lives + 1);
+    this.pops.push({ x: X, y: Y, t: 0, txt: "+❤️", c: "#ff9db0" });
+    this.burst(X, Y, ["#ff5d8a", "#ffd7e2", "#ff9db0"]);
+    this.sfx([784, 988, 1175, 1568], 0.08, "sine", 0.16);   // очки НЕ начисляем — ev-инвариант рейтинга не трогаем
+    if (this.debug.on) this.dlog("❤ +1 жизнь → " + this.lives);
+  }
+  devSpawnHeart() { if (this.simV >= 6) { this.spawnHeart(); this.dlog("❤ dev-спавн"); } }
   takeHit() {
     this.player.inv = 1.6; this.shakeT = 0.35;
     if (this.rec && !this.REPLAYING && this.rec.ev.length < 5900) this.rec.ev.push([this.recT(), "h"]);
@@ -445,7 +510,7 @@ export class GameEngine {
     const zone = this.mode3d ? "3d" : this.zuma ? "zuma" : "2d";
     if (zone !== this.wasZone) {
       this.wasZone = zone; this.prepT = 3; this.gifts = []; this.snow = []; this.tGift = .5; this.tSnow = 1.2;
-      this.zc = null;
+      this.zc = null; this.hearts = [];
       if (this.mode3d) this.makeTrees3();
       else { this.player.tx = this.W / 2; }
       if (this.zuma) this.zInit();
@@ -453,6 +518,7 @@ export class GameEngine {
     }
 
     if (this.mode3d) this.update3d(dt); else if (this.zuma) this.updateZuma(dt); else this.update2d(dt);
+    if (this.simV >= 6) { this.updateHeartSpawns(dt); this.updateHearts(dt); }   // сердечки во всех зонах
 
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i]; p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 500 * dt;
@@ -571,9 +637,10 @@ export class GameEngine {
   zInit() {
     const sp = this.simV >= 4;
     const chain: any[] = [];
-    const startS = this.zLen * (sp ? 0.55 : 0.32);
+    // v6: спираль длинная, а зона 60 с — голова стартует ближе к центру, чтобы успевать кусать деда
+    const startS = this.zLen * (this.simV >= 6 ? 0.62 : this.simV >= 4 ? 0.55 : 0.32);
     for (let i = 0; i < 14; i++) chain.push({ t: this.zNewType(chain), s: startS - i * 36, seed: this.rng() * 6.28 });
-    this.zc = { chain, projs: [], loaded: null, tFire: 0, stall: 0, pending: null, iptr: 0, pauseT: 0 };
+    this.zc = { chain, projs: [], loaded: null, tFire: 0, stall: 0, pending: null, iptr: 0, pauseT: 0, warned: false };
     this.zAim = { x: this.W / 2, y: 300 };
     this.player.x = this.player.tx = this.W / 2;
     if (sp) this.player.y = this.H / 2;   // Дед Мороз — в центре спирали
@@ -588,14 +655,14 @@ export class GameEngine {
       const code = this.simV >= 4 ? -(10000 + Math.round((ang + Math.PI) * 1000)) : -Math.round(Math.abs(ang) * 1000);
       this.rec.inputs.push([this.recT(), code]);
     }
-    this.sfx([520, 780], 0.05, "square", 0.1);
+    this.sfx([560, 920], 0.06, "square", 0.18);
   }
   zMatch(i: number) {
-    const ch = this.zc.chain; if (i < 0 || i >= ch.length) return;
+    const ch = this.zc.chain; if (i < 0 || i >= ch.length) return false;
     const t = ch[i].t; let a = i, b = i;
     while (a > 0 && ch[a - 1].t === t) a--;
     while (b + 1 < ch.length && ch[b + 1].t === t) b++;
-    if (b - a + 1 < 3) return;
+    if (b - a + 1 < 3) return false;
     const val = t === "b" ? 50 : 10;
     for (let k = a; k <= b; k++) {
       const p = this.zPos(Math.max(0, ch[k].s));
@@ -612,9 +679,21 @@ export class GameEngine {
       this.pops.push({ x: this.W / 2, y: this.H / 2, t: 0, txt: "🧹 +50", c: "#ffd75e" });
       this.burst(this.player.x, this.player.y - 60, ["#ffd75e", "#fff3b0", "#ffb347"]);
       zc.pauseT = this.time + 4.5;
-      this.sfx([784, 1046, 1318, 1568], 0.09, "square", 0.16);
+      this.sfx([784, 1046, 1318, 1568], 0.09, "square", 0.2);
     }
-    this.sfx(t === "b" ? [1046, 1568, 2093] : [880, 1318], 0.07, "square", 0.14);
+    const n = b - a + 1;   // тем громче и выше, чем больше группа лопнула
+    this.sfx(t === "b" ? [1046, 1568, 2093].slice(0, Math.min(3, n - 1)) : [880, 1318, 1760].slice(0, Math.min(3, n - 1)),
+      0.075, "square", 0.15 + Math.min(0.09, (n - 3) * 0.025));
+    return true;
+  }
+  zAutoCollapse() {
+    // группа из 3+ одинаковых «съехалась» (соседи сошлись после лопнувшей дыры) — схлопывается сама; после попа — перезапуск (цепочка комбо)
+    const ch = this.zc.chain, gap = 36;
+    for (let i = 0; i < ch.length;) {
+      let j = i; while (j + 1 < ch.length && ch[j + 1].t === ch[i].t) j++;
+      if (j - i + 1 >= 3 && ch[i].s - ch[j].s <= (j - i) * gap + 4) { this.zMatch(i); i = 0; }
+      else i = j + 1;
+    }
   }
   updateZuma(dt: number) {
     const zc = this.zc; if (!zc) return;
@@ -632,10 +711,10 @@ export class GameEngine {
     } else if (zc.pending != null) {
       const a = zc.pending; zc.pending = null; this.zFire(a);
     }
-    if (!zc.loaded) zc.loaded = this.zPick();
+    if (!zc.loaded) { zc.loaded = this.zPick(); this.sfx([660], 0.03, "square", 0.08); }   // щелчок перезарядки
     zc.tFire = Math.max(0, zc.tFire - dt); zc.stall = Math.max(0, zc.stall - dt);
-    // скорость цепочки по версиям: v4 — спираль и ещё медленнее, v3 — 20+4*diff, v2 — историческая 30+8*diff
-    const zs = this.simV >= 4 ? 14 + 3 * this.diff() : this.simV >= 3 ? 20 + 4 * this.diff() : 30 + 8 * this.diff();
+    // скорость цепочки по версиям: v5 — ещё медленнее, v4 — спираль 14+3*diff, v3 — 20+4*diff, v2 — историческая 30+8*diff
+    const zs = this.simV >= 5 ? 12 + 2.5 * this.diff() : this.simV >= 4 ? 14 + 3 * this.diff() : this.simV >= 3 ? 20 + 4 * this.diff() : 30 + 8 * this.diff();
     const v = this.prepT > 0 || zc.stall > 0 ? 0 : zs;
     for (const b of ch) b.s += v * dt;
     for (let i = 1; i < ch.length; i++) {
@@ -645,6 +724,11 @@ export class GameEngine {
     if (this.prepT <= 0 && ch.length < 40 && this.time >= zc.pauseT &&
         (!ch.length || ch[ch.length - 1].s >= gap))
       ch.push({ t: this.zNewType(ch), s: 0, seed: this.rng() * 6.28 });
+    if (this.simV >= 5) this.zAutoCollapse();   // v5: съехавшиеся группы 3+ лопаются сами (комбо)
+    // тревога: цепочка близко к деду (с гистерезисом, чтобы не пищать каждый кадр)
+    if (ch.length && this.prepT <= 0 && zc.stall <= 0 && ch[0].s > L - 260 && !zc.warned) {
+      zc.warned = true; this.sfx([988, 988, 988], 0.06, "triangle", 0.18);
+    } else if (zc.warned && (!ch.length || ch[0].s <= L - 300 || zc.stall > 0)) zc.warned = false;
     // укус: цепочка дошла до деда — откусываем голову, цепочка встаёт на паузу
     let head = 0; while (head < ch.length && ch[head].s >= L - 8) head++;
     if (head > 0) {
@@ -652,7 +736,7 @@ export class GameEngine {
       for (const b of ch) b.s -= 160;   // откатываем остаток от деда
       zc.stall = 1.1;
       this.burst(this.player.x, this.player.y - 40, ["#ffffff", "#bfe4ff", "#7ec8ff"]);
-      this.sfx([180, 120, 90], 0.09, "sawtooth", 0.2);
+      this.sfx([160, 110, 70], 0.12, "sawtooth", 0.26);
       if (this.canHit()) this.takeHit();
     }
     // снаряды и попадания
@@ -665,7 +749,9 @@ export class GameEngine {
         if (Math.hypot(p.x - q.x, p.y - q.y) < 27) {
           ch.splice(k + 1, 0, { t: p.t, s: b.s - gap, seed: (k * 7) % 6.28 });
           for (let m = k + 2; m < ch.length; m++) ch[m].s -= gap;
-          zc.projs.splice(i, 1); this.zMatch(k + 1); break;
+          zc.projs.splice(i, 1);
+          if (!this.zMatch(k + 1)) this.sfx([240], 0.05, "triangle", 0.13);   // глухое «тук» — шарик вставлен, но не лопнул
+          break;
         }
       }
     }
@@ -695,6 +781,14 @@ export class GameEngine {
       ctx.font = "30px " + this.EMOJI_FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.sin(this.time * 3 + b.seed) * 0.15);
       ctx.fillText(GameEngine.ZEMOJI[b.t], 0, 1); ctx.restore();
+    }
+    for (const h of this.hearts) {   // v6: сердечко у тропки — собирай выстрелом
+      const gl = ctx.createRadialGradient(h.x, h.y, 4, h.x, h.y, 34);
+      gl.addColorStop(0, "rgba(255,120,160,.9)"); gl.addColorStop(1, "rgba(255,90,140,0)");
+      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(h.x, h.y, 34, 0, 6.29); ctx.fill();
+      const pu = 1 + Math.sin(this.time * 5 + h.seed) * .1;
+      ctx.save(); ctx.translate(h.x, h.y); ctx.scale(pu, pu);
+      ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0); ctx.restore();
     }
     ctx.font = "26px " + this.EMOJI_FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const p of zc.projs) ctx.fillText(GameEngine.ZEMOJI[p.t], p.x, p.y);
@@ -737,16 +831,19 @@ export class GameEngine {
     }
     const glow = ctx.createRadialGradient(0, 0, 5, 0, 0, 58);
     glow.addColorStop(0, "rgba(255,150,110,.85)");
-    glow.addColorStop(.55, "rgba(255,110,90,.32)");
+    glow.addColorStop(.55, "rgba(255,110,90,.35)");
     glow.addColorStop(1, "rgba(255,90,80,0)");
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(0, 0, 58, 0, 6.29); ctx.fill();
+    // мягкий внешний ореол вместо ctx.shadowBlur: на iOS Safari тени эмодзи превращаются в гигантское «странное свечение»
+    const halo = ctx.createRadialGradient(0, 0, 30, 0, 0, 74);
+    halo.addColorStop(0, "rgba(255,140,100,.30)"); halo.addColorStop(1, "rgba(255,120,90,0)");
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, 0, 74, 0, 6.29); ctx.fill();
     ctx.font = "80px " + this.EMOJI_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.shadowColor = "#ff7a66"; ctx.shadowBlur = 18;
     ctx.fillText("🎅", 0, 0);
-    ctx.fillText("🎅", 0, 0);   // двойная отрисовка усиливает свечение (приём из 2D-подарков)
-    ctx.restore();   // restore сбрасывает и filter, и тень
+    ctx.fillText("🎅", 0, 0);   // двойная отрисовка делает глиф плотнее (без тени — одинаково на всех платформах)
+    ctx.restore();   // restore сбрасывает и filter
   }
   draw3dGround() {
     const ctx = this.ctx, W = this.W, H = this.H;
@@ -797,6 +894,7 @@ export class GameEngine {
     const all: any[] = [];
     for (const g of this.gifts) all.push({ kind: "gift", o: g });
     for (const s of this.snow) all.push({ kind: "snow", o: s });
+    for (const h of this.hearts) all.push({ kind: "heart", o: h });
     all.sort((a, b) => b.o.z - a.o.z);
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const it of all) {
@@ -808,6 +906,11 @@ export class GameEngine {
         ctx.font = size + "px " + this.EMOJI_FONT;
         ctx.save(); ctx.translate(p.X, p.Y - size * .4); ctx.rotate(Math.sin(this.time * 3 + o.seed) * .2);
         ctx.fillText(o.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
+      } else if (it.kind === "heart") {
+        const size = Math.max(7, Math.min(200, p.s * .9));
+        ctx.font = size + "px " + this.EMOJI_FONT;
+        ctx.save(); ctx.translate(p.X, p.Y - size * .5); ctx.rotate(Math.sin(this.time * 4 + o.seed) * .15);
+        ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0); ctx.restore();
       } else {
         const r = Math.max(3.5, Math.min(120, p.s * o.r * .024));
         const rg = ctx.createRadialGradient(p.X - r * .3, p.Y - r * 1.2 - r * .3, r * .2, p.X, p.Y - r * 1.2, r);
@@ -856,15 +959,29 @@ export class GameEngine {
         for (const g of this.gifts) {
           ctx.save(); ctx.translate(g.x, g.y);
           const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 46);
-          if (g.bonus) { glow.addColorStop(0, "rgba(255,236,130,.95)"); glow.addColorStop(.55, "rgba(255,210,70,.4)"); glow.addColorStop(1, "rgba(255,215,80,0)"); }
-          else { glow.addColorStop(0, "rgba(255,130,110,.8)"); glow.addColorStop(.55, "rgba(255,100,90,.3)"); glow.addColorStop(1, "rgba(255,90,80,0)"); }
+          if (g.bonus) { glow.addColorStop(0, "rgba(255,236,130,.95)"); glow.addColorStop(.55, "rgba(255,210,70,.5)"); glow.addColorStop(1, "rgba(255,215,80,0)"); }
+          else { glow.addColorStop(0, "rgba(255,130,110,.85)"); glow.addColorStop(.55, "rgba(255,100,90,.42)"); glow.addColorStop(1, "rgba(255,90,80,0)"); }
           ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 46, 0, 6.29); ctx.fill();
+          const halo2 = ctx.createRadialGradient(0, 0, 24, 0, 0, 60);
+          halo2.addColorStop(0, g.bonus ? "rgba(255,220,90,.28)" : "rgba(255,120,100,.26)"); halo2.addColorStop(1, "rgba(255,120,100,0)");
+          ctx.fillStyle = halo2; ctx.beginPath(); ctx.arc(0, 0, 60, 0, 6.29); ctx.fill();
           ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
-          ctx.shadowColor = g.bonus ? "#ffe98a" : "#ff7a66";
-          ctx.shadowBlur = 18;
           ctx.font = (g.bonus ? 44 : 46) + "px " + this.EMOJI_FONT;
           ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
           ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
+          ctx.restore();
+        }
+        for (const h of this.hearts) {
+          ctx.save(); ctx.translate(h.x, h.y);
+          const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 46);
+          glow.addColorStop(0, "rgba(255,120,160,.9)"); glow.addColorStop(.55, "rgba(255,80,130,.42)"); glow.addColorStop(1, "rgba(255,90,140,0)");
+          ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 46, 0, 6.29); ctx.fill();
+          const halo3 = ctx.createRadialGradient(0, 0, 24, 0, 0, 62);
+          halo3.addColorStop(0, "rgba(255,110,150,.3)"); halo3.addColorStop(1, "rgba(255,90,140,0)");
+          ctx.fillStyle = halo3; ctx.beginPath(); ctx.arc(0, 0, 62, 0, 6.29); ctx.fill();
+          ctx.font = "44px " + this.EMOJI_FONT;
+          const pu = 1 + Math.sin(this.time * 5 + h.p) * .07; ctx.scale(pu, pu);
+          ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0);
           ctx.restore();
         }
         for (const s of this.snow) {
@@ -903,7 +1020,7 @@ export class GameEngine {
       ctx.font = "15px Arial"; ctx.fillStyle = "#9fb4ff";
       ctx.fillText("ур. " + this.diff().toFixed(1) + " · " + Math.floor(this.time) + "с" + (this.mode3d ? " · 🌀3D" : this.zuma ? " · 🎯Зумба" : ""), 18, 58);
       ctx.textAlign = "right"; ctx.font = "24px " + this.EMOJI_FONT;
-      let h = ""; for (let i = 0; i < 3; i++) h += i < this.lives ? "❤️ " : "🖤 ";
+      let h = "", nH = Math.max(3, this.lives); for (let i = 0; i < nH; i++) h += i < this.lives ? "❤️ " : "🖤 ";
       ctx.fillText(h, W - 14, 34);
     }
     if (this.REPLAYING && this.scripted && this.state !== "menu") {
