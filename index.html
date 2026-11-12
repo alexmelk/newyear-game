@@ -22,6 +22,8 @@
   .mini{padding:8px 16px;font-size:14px;font-weight:400;color:#cfd8ff;background:rgba(255,255,255,.1);box-shadow:none}
   .hidden{display:none!important}
   #sndBtn{position:absolute;right:12px;top:12px;z-index:11}
+  #verTag{position:absolute;left:10px;top:8px;z-index:6;font:11px Consolas,monospace;
+    color:rgba(160,180,230,.75);pointer-events:none}
   #exitRep{position:absolute;right:12px;bottom:12px;z-index:11}
   #repCheat{position:absolute;right:12px;bottom:56px;z-index:11}
   #dev{position:absolute;left:8px;bottom:8px;z-index:9;width:246px;background:rgba(6,10,26,.9);
@@ -91,6 +93,7 @@
   </div>
 
   <button id="sndBtn" class="mini hidden">🔊 Музыка</button>
+  <div id="verTag"></div>
   <button id="exitRep" class="mini hidden">✕ Выйти из реплея</button>
   <button id="repCheat" class="mini hidden">🚨 Читер!</button>
 
@@ -199,6 +202,7 @@ let state = "menu";           // menu | play | pause | over
 let time = 0, score = 0, giftsGot = 0, lives = 3, shakeT = 0;
 let player, gifts = [], snow = [], parts = [], pops = [], trees = [], flakes = [], tGift = 0, tSnow = 0;
 /* -------- общий рейтинг -------- */
+const VERSION = "1.6.0";
 /* === Конфигурация Supabase (общий рейтинг) — заполнено === */
 const SUPABASE_URL = "https://txysdosoenhgzhjsmffm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4eXNkb3NvZW5oZ3poanNtZmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0MzQ4MjksImV4cCI6MjExMDAxMDgyOX0.2ecVC9GmvxDlh6Vk9ktsqV40LHHFkjmma5T8utIR99s";
@@ -1082,6 +1086,7 @@ async function enterReplay(id) {
 const qReplay = new URLSearchParams(location.search).get("replay");
 if (!qReplay) loadBoard(); // таблица рекордов при запуске
 wireDev();
+document.getElementById("verTag").textContent = "v" + VERSION;
 if (debug.armed) toggleDebug(true);   // ?debug=1 теперь тоже требует пароль
 if (qReplay) enterReplay(qReplay);
 </script>
