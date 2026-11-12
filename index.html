@@ -195,7 +195,7 @@ function setMusic(on) {
 const EMOJI_FONT = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
 let state = "menu";           // menu | play | pause | over
 let time = 0, score = 0, giftsGot = 0, lives = 3, shakeT = 0;
-let player, gifts, snow, parts, pops, trees, flakes, tGift, tSnow;
+let player, gifts = [], snow = [], parts = [], pops = [], trees = [], flakes = [], tGift = 0, tSnow = 0;
 /* -------- общий рейтинг -------- */
 /* === Конфигурация Supabase (общий рейтинг) — заполнено === */
 const SUPABASE_URL = "https://txysdosoenhgzhjsmffm.supabase.co";
@@ -846,9 +846,9 @@ function draw() {
     ctx.textAlign = "left"; ctx.font = "12px Consolas, monospace"; ctx.fillStyle = "#7ffa9a";
     ctx.fillText("DEV fps:" + debug.fps + " t:" + time.toFixed(1) + "с " + (mode3d ? "3D" : "2D") +
       " lvl:" + diff().toFixed(2) + " g:" + gifts.length + " s:" + snow.length, 14, H - 34);
-    ctx.fillText("lives:" + lives + " inv:" + player.inv.toFixed(1) +
+    ctx.fillText("lives:" + lives + " inv:" + (player ? player.inv.toFixed(1) : "—") +
       (debug.slow ? " SLOW" : "") + (debug.inv ? " INV" : "") + (debug.inflives ? " ∞" : ""), 14, H - 18);
-    if (debug.boxes) {
+    if (debug.boxes && player) {
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(255,255,0,.5)"; ctx.beginPath(); ctx.moveTo(0, HOR); ctx.lineTo(W, HOR); ctx.stroke();
       ctx.strokeStyle = "rgba(255,90,90,.95)";
