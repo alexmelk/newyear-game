@@ -46,6 +46,8 @@
   .bRow.me{background:rgba(255,215,94,.18);color:#ffd75e;font-weight:700}
   .bRank{width:24px;color:#8fa0d8;flex:none}
   .bName{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .bOn{width:9px;height:9px;border-radius:50%;background:#3ddc70;box-shadow:0 0 6px 1px rgba(61,220,112,.8);
+    align-self:center;flex:none}
   .bScore{font-weight:700}
   .bEmpty{color:#8fa0d8;font-size:14px;padding:6px 10px}
   .bPlay{flex:none;padding:1px 8px;font-size:11px;font-weight:400;border-radius:6px;
@@ -202,15 +204,43 @@ const SUPABASE_URL = "https://txysdosoenhgzhjsmffm.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4eXNkb3NvZW5oZ3poanNtZmZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ0MzQ4MjksImV4cCI6MjExMDAxMDgyOX0.2ecVC9GmvxDlh6Vk9ktsqV40LHHFkjmma5T8utIR99s";
 /* ======================================================================= */
 const ON_NET = /^https?:$/.test(location.protocol);   // игра отдаётся нашим server.js?
-let board = [], mode = "local", savedThisRound = false, myKey = "";
+let board = [], mode = "local", savedThisRound = false, myKey = "", online = new Set();
 const SB = !!(SUPABASE_URL && SUPABASE_KEY);
 const sbH = { "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" };
+
+// «устройство»-id для индикации онлайн (зелёная точка у имени в таблице).
+// Случайный постоянный id браузера; теряется вместе с localStorage — не страшно.
+let cid = localStorage.getItem("xmasCid") || "";
+if (!/^[0-9a-zA-Z-]{10,40}$/.test(cid)) {
+  cid = ((typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12)
+  ).replace(/[^0-9a-zA-Z-]/g, "").slice(0, 40);
+  localStorage.setItem("xmasCid", cid);
+}
+function pingOnline() {
+  if (!SB) return;
+  fetch(SUPABASE_URL + "/functions/v1/ping", { method: "POST", headers: sbH, body: JSON.stringify({ cid }) }).catch(() => {});
+}
+if (SB) {
+  pingOnline();
+  setInterval(pingOnline, 25000);
+  addEventListener("visibilitychange", () => { if (!document.hidden) pingOnline(); });   // сразу после возвращения во вкладку
+}
 
 async function loadBoard() {
   if (SB) {
     try {
-      const r = await fetch(SUPABASE_URL + "/rest/v1/scores?select=id,name,score,date&hidden=eq.false&order=score.desc&limit=20", { headers: sbH });
-      if (r.ok) { board = await r.json(); mode = "supabase"; renderBoards(); return; }
+      const cutoff = encodeURIComponent(new Date(Date.now() - 70 * 1000).toISOString());
+      const [r, pr] = await Promise.all([
+        fetch(SUPABASE_URL + "/rest/v1/scores?select=id,name,score,date,client_id&hidden=eq.false&order=score.desc&limit=20", { headers: sbH }),
+        fetch(SUPABASE_URL + "/rest/v1/presence?select=client_id&seen_at=gte." + cutoff, { headers: sbH }),
+      ]);
+      if (r.ok) {
+        board = await r.json(); mode = "supabase";
+        try { online = new Set(pr.ok ? (await pr.json()).map(x => x.client_id) : []); } catch (e) { online = new Set(); }
+        renderBoards(); return;
+      }
     } catch (e) { /* уйдём в fallback */ }
   }
   if (ON_NET) {
@@ -239,9 +269,10 @@ async function submitScore(rawName) {
       // Прямая запись в БД анонимом закрыта (RLS insert policy удалена).
       const r = await fetch(SUPABASE_URL + "/functions/v1/submit-score", {
         method: "POST", headers: sbH,
-        body: JSON.stringify({ name, score, time: Math.floor(time), roundId: round.roundId, replay: rpStr }) });
+        body: JSON.stringify({ name, score, time: Math.floor(time), roundId: round.roundId, replay: rpStr, cid }) });
       if (r.ok) {
         board = await r.json(); savedThisRound = true; round = null; rec = null;
+        online.add(cid);   // раз страница открыта и результат сохранён — я точно онлайн
         markSaved(); renderBoards();
         dlog("board: score accepted"); return;
       }
@@ -274,7 +305,8 @@ function boardHTML() {
   let shownMy = false;
   return board.slice(0, 10).map((e, i) => {
     const k = e.name + "|" + e.score, me = k === myKey && !shownMy; if (me) shownMy = true;
-    return `<div class="bRow${me ? " me" : ""}"><span class="bRank">${i + 1}.</span><span class="bName">${esc(e.name)}</span><span class="bScore">${e.score}</span>${e.id && i < 3 ? `<button class="bPlay" title="Смотреть реплей" onclick="openReplay('${e.id}')">▶</button>` : ""}</div>`;
+    const on = e.client_id && online.has(e.client_id);
+    return `<div class="bRow${me ? " me" : ""}"><span class="bRank">${i + 1}.</span><span class="bName">${esc(e.name)}</span>${on ? '<span class="bOn" title="сейчас онлайн"></span>' : ""}<span class="bScore">${e.score}</span>${e.id && i < 3 ? `<button class="bPlay" title="Смотреть реплей" onclick="openReplay('${e.id}')">▶</button>` : ""}</div>`;
   }).join("");
 }
 function renderBoards() {
