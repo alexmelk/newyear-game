@@ -476,10 +476,17 @@ function draw3dItems() {
   const py = HOR + KY / Z_PL - 46;
   ctx.fillStyle = "rgba(0,0,0,.22)";
   ctx.beginPath(); ctx.ellipse(W / 2, py + 62, 64, 15, 0, 0, 6.29); ctx.fill();
+  // дед мороз — яркий, в тёплом свечении
   const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
-  ctx.globalAlpha = blink ? .3 : 1;
+  ctx.globalAlpha = blink ? .45 : 1;
   ctx.save(); ctx.translate(W / 2, py); ctx.rotate((lane - laneF) * .35);
-  ctx.font = "148px " + EMOJI_FONT; ctx.fillText("🎅", 0, 0); ctx.restore();
+  const pg = ctx.createRadialGradient(0, 0, 10, 0, 0, 110);
+  pg.addColorStop(0, "rgba(255,214,110,.45)"); pg.addColorStop(1, "rgba(255,214,110,0)");
+  ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(0, 0, 110, 0, 6.29); ctx.fill();
+  ctx.font = "148px " + EMOJI_FONT;
+  ctx.shadowColor = "rgba(255,220,130,.95)"; ctx.shadowBlur = 26;
+  ctx.fillText("🎅", 0, 0); ctx.fillText("🎅", 0, 0);
+  ctx.restore();
   ctx.globalAlpha = 1;
 }
 
@@ -809,11 +816,17 @@ function draw() {
         ctx.beginPath(); ctx.arc(x - s.r * .35, s.y - s.r * .35, s.r * .3, 0, 6.29); ctx.fill();
       }
       // дед мороз
+      // дед мороз — яркий, в тёплом свечении
       const blink = player.inv > 0 && Math.floor(player.inv * 10) % 2 === 0;
-      ctx.globalAlpha = blink ? 0.3 : 1;
-      ctx.font = 72 + "px " + EMOJI_FONT;
+      ctx.globalAlpha = blink ? 0.45 : 1;
       ctx.save(); ctx.translate(player.x, player.y); ctx.rotate((player.tx - player.x) * 0.002);
-      ctx.fillText("🎅", 0, 0); ctx.restore();
+      const pg = ctx.createRadialGradient(0, 0, 6, 0, 0, 64);
+      pg.addColorStop(0, "rgba(255,214,110,.5)"); pg.addColorStop(1, "rgba(255,214,110,0)");
+      ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(0, 0, 64, 0, 6.29); ctx.fill();
+      ctx.font = 72 + "px " + EMOJI_FONT;
+      ctx.shadowColor = "rgba(255,220,130,.95)"; ctx.shadowBlur = 20;
+      ctx.fillText("🎅", 0, 0); ctx.fillText("🎅", 0, 0);
+      ctx.restore();
       ctx.globalAlpha = 1;
     }
     // частицы
