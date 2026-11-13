@@ -75,7 +75,7 @@ export class GameEngine {
 
   // ---- цикл ----
   FIXED = 1 / 60;
-  last = performance.now(); acc = 0; rafId: any = null;
+  last = performance.now(); acc = 0; steps = 0; rafId: any = null;
   keys: any = {};
   private disposed = false;
 
@@ -256,6 +256,13 @@ export class GameEngine {
     };
   }
   recT() { return Math.round(this.time * 10) / 10; }
+  // v7: таймстемпы inputs = целый номер шага симуляции (сетка 1/60 с, она же у живого ранга
+  // и у вьюера — both шагают update(1/60)). Квантование в 0.1 с (v≤6) сдвигало инпуты на
+  // ±3 шага, а интервалы выстрелов могли улезть под кулдаун 0.3 — вьюер терял выстрелы,
+  // в зумбе это каскадом ломало всю симуляцию. ev и dur остаются в секундах.
+  recTs() { return this.simV >= 7 ? Math.max(0, this.steps - 1) : this.recT(); }
+  recTsEvt() { return this.simV >= 7 ? this.steps : this.recT(); }   // события между шагами: применятся на следующем шаге
+  vt() { return this.simV >= 7 ? this.steps - 1 : this.time; }
   diff() { return Math.min(3, 1 + this.time / 50); }
   fallSpeed() { return 240 * this.diff(); }
 
@@ -265,20 +272,20 @@ export class GameEngine {
     for (let i = 0; i < 70; i++) this.flakes.push({ x: Math.random() * this.W, y: Math.random() * this.H, r: 0.7 + Math.random() * 1.5, v: 25 + Math.random() * 55, p: Math.random() * 6.28 });
   }
   reset() {
-    this.time = 0; this.score = 0; this.giftsGot = 0; this.lives = 3; this.shakeT = 0;
+    this.time = 0; this.steps = 0; this.score = 0; this.giftsGot = 0; this.lives = 3; this.shakeT = 0;
     this.player = { x: this.W / 2, tx: this.W / 2, y: this.H - 110, r: 38, inv: 0 };
     this.gifts = []; this.snow = []; this.parts = []; this.pops = [];
     this.tGift = 0.6; this.tSnow = 1.4;
     this.mode3d = this.zuma = false; this.wasZone = "2d"; this.zc = null;
     this.lane = this.laneF = 0; this.prepT = 0; this.zoff = 0;
-    this.simV = this.REPLAYING && this.scripted ? Math.min(6, Math.max(1, this.scripted.data.v | 0) || 1) : 6;
+    this.simV = this.REPLAYING && this.scripted ? Math.min(7, Math.max(1, this.scripted.data.v | 0) || 1) : 7;
     this.zPath = this.simV >= 4 ? this.zPathSp : this.zPathS;
     this.zLen = this.simV >= 4 ? this.zLenSp : this.zLenS;
     this.seed0 = (this.round ? this.round.seed : Math.random() * 4294967296) >>> 0;
     this.rng = this.mulberry32(this.seed0);
     this.rngH = this.mulberry32((this.seed0 ^ 0x5EEDBA7E) >>> 0);
     this.nextHeartT = 10 + this.rngH() * 10; this.hearts = [];
-    if (!this.REPLAYING) this.rec = { v: 6, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
+    if (!this.REPLAYING) this.rec = { v: 7, seed: this.seed0, dur: 0, inputs: [[0, Math.round(this.W / 2)]], ev: [], lastV: this.W / 2, lastT: 0 };
     this.makeBack();
   }
 
@@ -313,13 +320,13 @@ export class GameEngine {
   spawn3dSnow() { const rng = this.rng; this.snow.push({ lane: (rng() * 3 | 0) - 1, ox: 0, z: this.Z_FAR, r: 20 + rng() * 10, seed: rng() * 6.28 }); }
   changeLane(d: number) {
     this.lane = Math.max(-1, Math.min(1, this.lane + d));
-    if (this.rec && !this.REPLAYING && this.rec.inputs.length < 5900) this.rec.inputs.push([this.recT(), this.lane]);
+    if (this.rec && !this.REPLAYING && this.rec.inputs.length < 5900) this.rec.inputs.push([this.recTsEvt(), this.lane]);
   }
 
   update3d(dt: number) {
     if (this.REPLAYING && this.scripted) {
       const ins = this.scripted.data.inputs;
-      while (this.scripted.ptr < ins.length - 1 && ins[this.scripted.ptr + 1][0] <= this.time) this.scripted.ptr++;
+      while (this.scripted.ptr < ins.length - 1 && ins[this.scripted.ptr + 1][0] <= this.vt()) this.scripted.ptr++;
       const lv = ins[this.scripted.ptr][1];
       if (this.simV <= 1 || (lv >= -1 && lv <= 1)) this.lane = lv | 0;   // v2: не брать мусорные значения (выстрелы зумбы)
     }
@@ -502,7 +509,7 @@ export class GameEngine {
       if (t.y > this.H + 60) { t.y = -70; t.x = Math.random() * this.W; t.s = 0.5 + Math.random() * 0.7; }
     }
 
-    this.time += dt;
+    this.time += dt; this.steps++;
     this.player.inv = Math.max(0, this.player.inv - dt);
     this.shakeT = Math.max(0, this.shakeT - dt);
     this.prepT = Math.max(0, this.prepT - dt);
@@ -538,7 +545,7 @@ export class GameEngine {
     const W = this.W, player = this.player;
     if (this.REPLAYING && this.scripted) {
       const ins = this.scripted.data.inputs;
-      while (this.scripted.ptr < ins.length - 1 && ins[this.scripted.ptr + 1][0] <= this.time) this.scripted.ptr++;
+      while (this.scripted.ptr < ins.length - 1 && ins[this.scripted.ptr + 1][0] <= this.vt()) this.scripted.ptr++;
       const tv = ins[this.scripted.ptr][1];
       if (this.simV <= 1 || (tv > 20 && tv < this.W + 20)) player.tx = tv;   // v2: игнорируем lane/выстрелы других зон
     } else {
@@ -551,7 +558,7 @@ export class GameEngine {
     if (rec && !this.REPLAYING && rec.inputs.length < 5900 && this.time - rec.lastT >= 0.05 &&
         (Math.abs(player.tx - rec.lastV) > 6 || this.time - rec.lastT > 4)) {
       rec.lastV = player.tx; rec.lastT = this.time;
-      rec.inputs.push([this.recT(), Math.round(player.tx)]);
+      rec.inputs.push([this.recTs(), Math.round(player.tx)]);
     }
 
     const rng = this.rng;
@@ -660,7 +667,7 @@ export class GameEngine {
     if (this.rec && !this.REPLAYING && this.rec.inputs.length < 5900) {
       // v4: полный круг (угол со знаком), код = -(10000 + (ang+π)*1000); старые версии: -|ang|*1000
       const code = this.simV >= 4 ? -(10000 + Math.round((ang + Math.PI) * 1000)) : -Math.round(Math.abs(ang) * 1000);
-      this.rec.inputs.push([this.recT(), code]);
+      this.rec.inputs.push([this.recTs(), code]);
     }
     this.sfx([560, 920], 0.06, "square", 0.18);
   }
@@ -710,7 +717,7 @@ export class GameEngine {
     // вживую — из pending-клика, чтобы очерёдность rng совпадала с записью
     if (this.REPLAYING && this.scripted) {
       const ins = this.scripted.data.inputs;
-      while (zc.iptr < ins.length && ins[zc.iptr][0] <= this.time) {
+      while (zc.iptr < ins.length && ins[zc.iptr][0] <= this.vt()) {
         const v = ins[zc.iptr++][1];
         if (this.simV >= 4 && typeof v === "number" && v <= -10000 && v >= -16400) this.zFire((-v - 10000) / 1000 - Math.PI);
         else if (typeof v === "number" && v <= -120 && v >= -3200) this.zFire(v / 1000);
@@ -1159,6 +1166,9 @@ export class GameEngine {
     this.REPLAYING = true; this.round = null;
     this.reset();
     this.seed0 = (this.scripted.data.seed || 0) >>> 0; this.rng = this.mulberry32(this.seed0);
+    // поток сердечек (v6+) обязан совпадать с живым рангом: пересадить rngH тем же seed0, как в reset()
+    this.rngH = this.mulberry32((this.seed0 ^ 0x5EEDBA7E) >>> 0);
+    this.nextHeartT = 10 + this.rngH() * 10; this.hearts = [];
     this.rec = null;
     this.state = "play";
     try { this.startMusic(); } catch (e) { /* ignore */ }
