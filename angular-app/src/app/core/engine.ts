@@ -25,6 +25,8 @@ export class GameEngine {
   scale = 1;
   EMOJI_FONT = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
   glowOk = true;   // ctx.shadowBlur вокруг эмодзи только на десктопе: в iOS Safari тени/фильтры превращают их в размытые блобы
+  px = 1;          // device-пикселей на логический пиксель (scale×DPR) — для рендера эмодзи-спрайтов
+  emojiCache = new Map<string, HTMLCanvasElement>();
 
   state = "menu";
   time = 0; score = 0; giftsGot = 0; lives = 3; shakeT = 0;
@@ -178,6 +180,7 @@ export class GameEngine {
     this.cv.style.width = (this.W * this.scale) + "px";
     this.cv.style.height = (this.H * this.scale) + "px";
     this.ctx.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, 0, 0);
+    this.px = this.scale * dpr;
   }
 
   /* ================= музыка ================= */
@@ -784,7 +787,7 @@ export class GameEngine {
       ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(p.x, p.y, 34, 0, 6.29); ctx.fill();
       ctx.font = "30px " + this.EMOJI_FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.sin(this.time * 3 + b.seed) * 0.15);
-      ctx.fillText(GameEngine.ZEMOJI[b.t], 0, 1); ctx.restore();
+      this.drawEmoji(GameEngine.ZEMOJI[b.t], 30, 0, 1); ctx.restore();
     }
     for (const h of this.hearts) {   // v6: сердечко у тропки — собирай выстрелом
       const gl = ctx.createRadialGradient(h.x, h.y, 4, h.x, h.y, 34);
@@ -792,10 +795,11 @@ export class GameEngine {
       ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(h.x, h.y, 34, 0, 6.29); ctx.fill();
       const pu = 1 + Math.sin(this.time * 5 + h.seed) * .1;
       ctx.save(); ctx.translate(h.x, h.y); ctx.scale(pu, pu);
-      ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0); ctx.restore();
+      if (this.glowOk) { ctx.shadowColor = "#ff5d8a"; ctx.shadowBlur = 18; }
+      this.drawEmoji("❤️", 44); ctx.restore();
     }
     ctx.font = "26px " + this.EMOJI_FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    for (const p of zc.projs) ctx.fillText(GameEngine.ZEMOJI[p.t], p.x, p.y);
+    for (const p of zc.projs) this.drawEmoji(GameEngine.ZEMOJI[p.t], 26, p.x, p.y);
     if (!this.REPLAYING) {
       const ang = this.zAimAng();
       const oy = this.zShotY();
@@ -803,7 +807,7 @@ export class GameEngine {
       ctx.beginPath(); ctx.moveTo(this.player.x, oy);
       ctx.lineTo(this.player.x + Math.cos(ang) * 150, oy + Math.sin(ang) * 150);
       ctx.stroke(); ctx.setLineDash([]);
-      if (zc.loaded) ctx.fillText(GameEngine.ZEMOJI[zc.loaded], this.player.x, this.player.y - (this.simV >= 4 ? 108 : 96));
+      if (zc.loaded) this.drawEmoji(GameEngine.ZEMOJI[zc.loaded], 26, this.player.x, this.player.y - (this.simV >= 4 ? 108 : 96));
     }
     // дед Мороз в конце тропки (серый и с падением после укуса)
     ctx.save(); ctx.translate(this.player.x, this.player.y);
@@ -824,6 +828,36 @@ export class GameEngine {
       ctx.beginPath(); ctx.moveTo(x, oy - h); ctx.lineTo(x - w, oy + h * 0.4); ctx.lineTo(x + w, oy + h * 0.4); ctx.closePath(); ctx.fill();
     }
   }
+  /* ================= эмодзи-спрайты =================
+     iOS Safari под ctx.rotate/ctx.scale рисует цветные эмодзи монохромным размытым силуэтом.
+     Лечится пред-рендером глифа БЕЗ трансформаций в офскрин-canvas (в device-разрешении)
+     и drawImage уже внутри трансформированного контекста — одинаково чётко на всех платформах */
+  emojiSprite(ch: string, devPx: number): HTMLCanvasElement {
+    const q = Math.max(8, Math.ceil(devPx));
+    const key = ch + "@" + q;
+    let c = this.emojiCache.get(key);
+    if (!c) {
+      c = document.createElement("canvas");
+      const side = Math.ceil(q * 1.35) + 2;
+      c.width = side; c.height = side;
+      const x = c.getContext("2d")!;
+      // только дефолтные выравнивание/бейзлайн: в iOS Safari center/middle у эмодзи иногда даёт
+      // монохромный глиф; центрируем вручную через measureText (путь, проверенно цветной в HUD)
+      x.font = q + "px " + this.EMOJI_FONT;
+      const w = x.measureText(ch).width || q;
+      x.fillText(ch, (side - w) / 2, side / 2 + q * 0.34);
+      this.emojiCache.set(key, c);
+    }
+    return c;
+  }
+  drawEmoji(ch: string, size: number, x = 0, y = 0) {
+    const ctx = this.ctx;
+    if (typeof document === "undefined" || !document.createElement) { ctx.fillText(ch, x, y); return; }
+    const c = this.emojiSprite(ch, size * this.px);
+    const w = c.width / this.px, h = c.height / this.px;
+    ctx.drawImage(c, x - w / 2, y - h / 2, w, h);
+  }
+
   drawSanta(s: number, inv = 0) {
     // игрок — эмодзи Деда Мороза, светится как подарки; сразу после столкновения «сереет»
     // и постепенно отходит по мере окончания неуязвимости. Без ctx.filter: в iOS Safari
@@ -842,8 +876,7 @@ export class GameEngine {
     ctx.font = "80px " + this.EMOJI_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     if (this.glowOk) { ctx.shadowColor = "#ff7a66"; ctx.shadowBlur = 18; }   // прежнее свечение, только на десктопе
-    ctx.fillText("🎅", 0, 0);
-    ctx.fillText("🎅", 0, 0);   // двойная отрисовка делает глиф плотнее
+    this.drawEmoji("🎅", 80);
     if (this.glowOk) { ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; }
     if (inv > 0) {
       const k = Math.min(1, inv / 1.2);   // 1.6..1.2 — полный серый, дальше цвет возвращается
@@ -914,12 +947,12 @@ export class GameEngine {
         const size = Math.max(7, Math.min(200, p.s * .8));
         ctx.font = size + "px " + this.EMOJI_FONT;
         ctx.save(); ctx.translate(p.X, p.Y - size * .4); ctx.rotate(Math.sin(this.time * 3 + o.seed) * .2);
-        ctx.fillText(o.bonus ? "⭐" : "🎁", 0, 0); ctx.restore();
+        this.drawEmoji(o.bonus ? "⭐" : "🎁", size); ctx.restore();
       } else if (it.kind === "heart") {
         const size = Math.max(7, Math.min(200, p.s * .9));
         ctx.font = size + "px " + this.EMOJI_FONT;
         ctx.save(); ctx.translate(p.X, p.Y - size * .5); ctx.rotate(Math.sin(this.time * 4 + o.seed) * .15);
-        ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0); ctx.restore();
+        this.drawEmoji("❤️", size); ctx.restore();
       } else {
         const r = Math.max(3.5, Math.min(120, p.s * o.r * .024));
         const rg = ctx.createRadialGradient(p.X - r * .3, p.Y - r * 1.2 - r * .3, r * .2, p.X, p.Y - r * 1.2, r);
@@ -977,8 +1010,7 @@ export class GameEngine {
           ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
           ctx.font = (g.bonus ? 44 : 46) + "px " + this.EMOJI_FONT;
           if (this.glowOk) { ctx.shadowColor = g.bonus ? "#ffe98a" : "#ff7a66"; ctx.shadowBlur = 18; }
-          ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
-          ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
+          this.drawEmoji(g.bonus ? "⭐" : "🎁", g.bonus ? 44 : 46);
           ctx.restore();
         }
         for (const h of this.hearts) {
@@ -992,7 +1024,7 @@ export class GameEngine {
           ctx.font = "44px " + this.EMOJI_FONT;
           if (this.glowOk) { ctx.shadowColor = "#ff5d8a"; ctx.shadowBlur = 18; }
           const pu = 1 + Math.sin(this.time * 5 + h.p) * .07; ctx.scale(pu, pu);
-          ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0);
+          this.drawEmoji("❤️", 44);
           ctx.restore();
         }
         for (const s of this.snow) {
@@ -1031,8 +1063,10 @@ export class GameEngine {
       ctx.font = "15px Arial"; ctx.fillStyle = "#9fb4ff";
       ctx.fillText("ур. " + this.diff().toFixed(1) + " · " + Math.floor(this.time) + "с" + (this.mode3d ? " · 🌀3D" : this.zuma ? " · 🎯Зумба" : ""), 18, 58);
       ctx.textAlign = "right"; ctx.font = "24px " + this.EMOJI_FONT;
-      let h = "", nH = Math.max(3, this.lives); for (let i = 0; i < nH; i++) h += i < this.lives ? "❤️ " : "🖤 ";
-      ctx.fillText(h, W - 14, 34);
+      // сердечки рисуем поштучно спрайтами: повторы одного эмодзи в строке на iOS Safari
+      // теряют цветной presentation и превращаются в чёрные глифы (🖤 вместо ❤️)
+      const nH = Math.max(3, this.lives);
+      for (let i = 0; i < nH; i++) this.drawEmoji(i < this.lives ? "❤️" : "🖤", 22, W - 26 - i * 24, 26);
     }
     if (this.REPLAYING && this.scripted && this.state !== "menu") {
       ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,215,94,.95)"; ctx.font = "bold 16px Arial";

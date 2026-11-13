@@ -31,6 +31,8 @@ button:active { transform: scale(.97); }
 #trkBtn { position: absolute; right: 12px; top: 130px; z-index: 11; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* кнопки поверх тёмного канваса должны читаться на любом телефоне; сдвинуты вниз — чтобы не наезжать на сердечки-жизни */
 #sndBtn.mini, #trkBtn.mini { background: rgba(14, 20, 46, .78); border: 1px solid rgba(150, 170, 255, .38); color: #e8edff; }
+/* на маленьких экранах переключение трека только загромождает игру — остаётся одна кнопка звука */
+@media (max-width: 600px) { #trkBtn { display: none; } }
 #verTag {
   position: absolute; left: 10px; top: 8px; z-index: 6; font: 11px Consolas, monospace;
   color: rgba(160, 180, 230, .75); pointer-events: none;
