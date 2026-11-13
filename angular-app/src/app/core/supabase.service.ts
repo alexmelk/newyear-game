@@ -15,7 +15,7 @@ export interface ScoreRow {
   replay_bytes?: number;
 }
 
-export interface SubmitResult { ok: boolean; status?: number; viaRound?: boolean; }
+export interface SubmitResult { ok: boolean; status?: number; viaRound?: boolean; reason?: string; }
 
 /**
  * Сетевой слой: Supabase (общий рейтинг, античит-подача, присутствие,
@@ -42,13 +42,14 @@ export class SupabaseService {
 
   // «устройство»-id для индикации онлайн (зелёная точка у имени в таблице)
   private ensureCid(): string {
-    let cid = localStorage.getItem("xmasCid") || "";
+    let cid = "";
+    try { cid = localStorage.getItem("xmasCid") || ""; } catch { /* iOS private mode — localStorage бросает */ }
     if (!/^[0-9a-zA-Z-]{10,40}$/.test(cid)) {
       const c: Crypto = (window as any).crypto;
       cid = ((typeof c !== "undefined" && c.randomUUID) ? c.randomUUID()
         : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12))
         .replace(/[^0-9a-zA-Z-]/g, "").slice(0, 40);
-      localStorage.setItem("xmasCid", cid);
+      try { localStorage.setItem("xmasCid", cid); } catch { /* приватный режим — живём без cid */ }
     }
     return cid;
   }
@@ -108,17 +109,21 @@ export class SupabaseService {
     localStorage.setItem("xmasTop", JSON.stringify(this.board));
   }
 
-  // регистрация раунда: id + seed для детерминированной симуляции
+  // регистрация раунда: id + seed для детерминированной симуляции (3 попытки — мобильная сеть капризна)
   async startRound(): Promise<any> {
     if (!this.SB) return null;
-    try {
-      const ctl = new AbortController();
-      const to = setTimeout(() => ctl.abort(), 5000);
-      const r = await fetch(SUPABASE_URL + "/functions/v1/start-round",
-        { method: "POST", headers: this.headers, body: "{}", signal: ctl.signal });
-      clearTimeout(to);
-      return r.ok ? await r.json() : null;
-    } catch { return null; }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const ctl = new AbortController();
+        const to = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(SUPABASE_URL + "/functions/v1/start-round",
+          { method: "POST", headers: this.headers, body: "{}", signal: ctl.signal });
+        clearTimeout(to);
+        if (r.ok) { const j = await r.json(); if (j && j.roundId) return j; }
+      } catch { /* retry */ }
+      if (attempt < 2) await new Promise(res => setTimeout(res, 400 * (attempt + 1)));
+    }
+    return null;
   }
 
   /**
@@ -128,10 +133,14 @@ export class SupabaseService {
   async submitScore(rawName: string, score: number, time: number, round: any, rpStr: string | null): Promise<SubmitResult> {
     if (this.savedThisRound || score <= 0) return { ok: false };
     const name = this.sanitizeName(rawName);
-    localStorage.setItem("xmasName", name);
+    try { localStorage.setItem("xmasName", name); } catch { /* приватный режим iOS */ }
     const item: ScoreRow = { name, score, date: new Date().toISOString().slice(0, 10) };
     this.myKey = name + "|" + score;
-    if (this.mode === "supabase" && round && rpStr) {
+    if (this.mode === "supabase") {
+      // честная подача: без раунда/реплея НЕ делаем «фейковую» локальную запись —
+      // иначе на iOS казалось, что «✓ Сохранено», а в таблице не появлялось
+      if (!round) return { ok: false, status: 0, reason: "no-round" };
+      if (!rpStr) return { ok: false, status: 0, reason: "no-replay" };
       try {
         const r = await fetch(SUPABASE_URL + "/functions/v1/submit-score", {
           method: "POST", headers: this.headers,
@@ -142,8 +151,10 @@ export class SupabaseService {
           this.online.add(this.cid);  // страница открыта и результат принят — я точно онлайн
           return { ok: true, viaRound: true };
         }
-        return { ok: false, status: r.status };
-      } catch { /* fallback ниже */ }
+        let reason = "";
+        try { reason = String(((await r.json()) || {}).error || ""); } catch { /* не json */ }
+        return { ok: false, status: r.status, reason };
+      } catch { return { ok: false, status: 0, reason: "network" }; }
     } else if (this.mode === "server") {
       try {
         const r = await fetch("/api/scores", {

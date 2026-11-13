@@ -1,7 +1,8 @@
-// submit-score v2: приём результата ТОЛЬКО для зарегистрированного раунда.
+// submit-score v2.1: приём результата ТОЛЬКО для зарегистрированного раунда.
 // Проверки: раунд существует, не использован, не просрочен; replay привязан
-// к серверному seed; сумма событий == score; hits == 3; время реплея ==
-// реальному времени с момента старта; плюс прежние потолки и анти-спам.
+// к серверному seed; сумма событий == score; hits == 3..5 (с v6 сердечками
+// жизни могут быть добраны до 5); время реплея == реальному времени с момента
+// старта; плюс прежние потолки и анти-спам.
 // Replay хранится в таблице и доступен для просмотра (топ) и модерации.
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -82,7 +83,7 @@ Deno.serve(async (req) => {
       else return json({ error: "bad event type" }, 400);
     }
     if (sum !== score) return json({ error: "score != replay events" }, 400);
-    if (hits !== 3) return json({ error: "replay not finished" }, 400);
+    if (hits < 3 || hits > 5) return json({ error: "replay not finished" }, 400);   // 3 базовых + до 2 от сердечек (макс жизней 5)
 
     // --- временное окно: сколько реально прошло с момента старта раунда ---
     const dur = Number(rp.dur);
@@ -90,7 +91,7 @@ Deno.serve(async (req) => {
     if (Math.abs(dur - time) > 2) return json({ error: "time mismatch" }, 400);
     const elapsed = (Date.now() - new Date(round.started_at).getTime()) / 1000;
     if (dur > elapsed + 10) return json({ error: "replay longer than real time" }, 400);
-    if (elapsed > 900) return json({ error: "round expired" }, 400);
+    if (elapsed > 1800) return json({ error: "round expired" }, 400);   // 30 мин: на мобильных игра часто уходит в фон/лок надолго
 
     // --- анти-спам: не больше 6 записей с одного имени за 10 минут ---
     const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();

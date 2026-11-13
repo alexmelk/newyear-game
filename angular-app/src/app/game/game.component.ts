@@ -225,6 +225,7 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
       this.lastOver = null;
       e.startGame(round);
       this.uiState = "play";
+      if (!round) this.showError("⚠️ Раунд не зарегистрирован (нет связи) — счёт в таблицу не попадёт");
     } catch (err: any) {
       this.showError((err && err.message) || String(err));
     } finally {
@@ -246,9 +247,19 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
       this.saveBtnText = "✓ Сохранено";
       if (e.debug.on) e.dlog("board: score accepted");
     } else {
-      if (e.debug.on) e.dlog("board REJECT " + (res.status || "?"));
-      this.saveBtnText = res.status === 429 ? "Позже попробуй ⏳" : "⛔ Отклонено";
-      setTimeout(() => { this.saveBtnText = "💾 В таблицу"; }, 4000);
+      if (e.debug.on) e.dlog("board REJECT " + (res.status || "?") + " " + (res.reason || ""));
+      const REASONS: Record<string, string> = {
+        "no-round": "нет раунда 😕", "no-replay": "нет реплея", "network": "нет связи 📡",
+        "round expired": "долгая пауза 😴", "round already used": "уже сохранён",
+        "unknown round": "нет раунда 😕", "time mismatch": "время", "seed mismatch": "seed",
+        "score != replay events": "очки ≠ события", "replay not finished": "реплей",
+        "bad inputs": "слишком долго", "bad events": "слишком долго",
+        "impossible score": "аномалия", "too many requests": "часто", "db": "сервер",
+        "bad replay size": "реплей", "bad dur": "время",
+      };
+      const why = REASONS[res.reason || ""] || (res.reason ? String(res.reason).slice(0, 20) : "Отклонено");
+      this.saveBtnText = res.status === 429 ? "Позже попробуй ⏳" : "⛔ " + why;
+      setTimeout(() => { this.saveBtnText = "💾 В таблицу"; }, 6000);
     }
     this.cdr.markForCheck();
   }

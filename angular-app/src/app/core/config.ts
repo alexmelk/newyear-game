@@ -1,7 +1,7 @@
 /* Конфигурация приложения (общий рейтинг + версия). */
 // Версия приложения: отображается в углу игры, на админке и в бандле.
 // Правило: минор +1 на каждую публикацию фичей, патч — на фиксы.
-export const VERSION = "2.9.0";
+export const VERSION = "2.9.1";
 
 export const SUPABASE_URL = "https://txysdosoenhgzhjsmffm.supabase.co";
 export const SUPABASE_KEY =
