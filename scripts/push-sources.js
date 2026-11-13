@@ -43,6 +43,10 @@ function collect(relDir) {
     ...collect("angular-app"),
     ...collect(path.join("supabase", "functions")),
     "scripts/publish.js", "scripts/publish-dist.js", "scripts/deploy-function.js", "scripts/push-sources.js",
+    "scripts/tests/run.js", "scripts/tests/replays.js", "scripts/tests/segmentdiag.js",
+    "scripts/tools/livecheck.js", "scripts/tools/delorphan.js", "scripts/tools/subtest.js",
+    "scripts/tools/topestop.js",
+    "HANDOFF.md",
     "SETUP-Supabase.md", "server.js", "admin-redirect.html",
   ];
   const ref = await gh(`/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`);
