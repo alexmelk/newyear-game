@@ -24,6 +24,7 @@ export class GameEngine {
   ctx: CanvasRenderingContext2D;
   scale = 1;
   EMOJI_FONT = "'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif";
+  glowOk = true;   // ctx.shadowBlur вокруг эмодзи только на десктопе: в iOS Safari тени/фильтры превращают их в размытые блобы
 
   state = "menu";
   time = 0; score = 0; giftsGot = 0; lives = 3; shakeT = 0;
@@ -137,6 +138,9 @@ export class GameEngine {
 
   constructor(public cv: HTMLCanvasElement, public hooks: EngineHooks = {}) {
     this.ctx = cv.getContext("2d");
+    const nav = typeof navigator !== "undefined" ? navigator : null;
+    const ua = (nav && nav.userAgent) || "";
+    this.glowOk = !(/iP(hone|ad|od)/.test(ua) || (nav && (nav as any).platform === "MacIntel" && (nav as any).maxTouchPoints > 1));
     this.resize();
     window.addEventListener("resize", this.onResize);
     window.addEventListener("keydown", this.onKeyDown);
@@ -821,29 +825,34 @@ export class GameEngine {
     }
   }
   drawSanta(s: number, inv = 0) {
-    // игрок — эмодзи Деда Мороза, светится как подарки; сразу после столкновения сереет
-    // и постепенно «отходит» (цвет возвращается) по мере окончания неуязвимости
+    // игрок — эмодзи Деда Мороза, светится как подарки; сразу после столкновения «сереет»
+    // и постепенно отходит по мере окончания неуязвимости. Без ctx.filter: в iOS Safari
+    // фильтры (как и тени) превращают все эмодзи на канвасе в размытые оранжевые блобы
     const ctx = this.ctx;
     ctx.save(); ctx.scale(s, s);
-    if (inv > 0) {
-      const k = Math.min(1, inv / 1.2);   // 1.6..1.2 — полный серый, дальше цвет возвращается
-      ctx.filter = "grayscale(" + Math.round(k * 100) + "%) brightness(" + Math.round(100 - 18 * k) + "%)";
-    }
     const glow = ctx.createRadialGradient(0, 0, 5, 0, 0, 58);
     glow.addColorStop(0, "rgba(255,150,110,.85)");
     glow.addColorStop(.55, "rgba(255,110,90,.35)");
     glow.addColorStop(1, "rgba(255,90,80,0)");
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(0, 0, 58, 0, 6.29); ctx.fill();
-    // мягкий внешний ореол вместо ctx.shadowBlur: на iOS Safari тени эмодзи превращаются в гигантское «странное свечение»
     const halo = ctx.createRadialGradient(0, 0, 30, 0, 0, 74);
     halo.addColorStop(0, "rgba(255,140,100,.30)"); halo.addColorStop(1, "rgba(255,120,90,0)");
     ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, 0, 74, 0, 6.29); ctx.fill();
     ctx.font = "80px " + this.EMOJI_FONT;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    if (this.glowOk) { ctx.shadowColor = "#ff7a66"; ctx.shadowBlur = 18; }   // прежнее свечение, только на десктопе
     ctx.fillText("🎅", 0, 0);
-    ctx.fillText("🎅", 0, 0);   // двойная отрисовка делает глиф плотнее (без тени — одинаково на всех платформах)
-    ctx.restore();   // restore сбрасывает и filter
+    ctx.fillText("🎅", 0, 0);   // двойная отрисовка делает глиф плотнее
+    if (this.glowOk) { ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; }
+    if (inv > 0) {
+      const k = Math.min(1, inv / 1.2);   // 1.6..1.2 — полный серый, дальше цвет возвращается
+      ctx.globalAlpha = 0.6 * k;
+      ctx.fillStyle = "#9aa3b5";
+      ctx.beginPath(); ctx.arc(0, -4, 40, 0, 6.29); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
   }
   draw3dGround() {
     const ctx = this.ctx, W = this.W, H = this.H;
@@ -967,6 +976,7 @@ export class GameEngine {
           ctx.fillStyle = halo2; ctx.beginPath(); ctx.arc(0, 0, 60, 0, 6.29); ctx.fill();
           ctx.rotate(Math.sin(g.p) * 0.25 + g.rot);
           ctx.font = (g.bonus ? 44 : 46) + "px " + this.EMOJI_FONT;
+          if (this.glowOk) { ctx.shadowColor = g.bonus ? "#ffe98a" : "#ff7a66"; ctx.shadowBlur = 18; }
           ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
           ctx.fillText(g.bonus ? "⭐" : "🎁", 0, 0);
           ctx.restore();
@@ -980,6 +990,7 @@ export class GameEngine {
           halo3.addColorStop(0, "rgba(255,110,150,.3)"); halo3.addColorStop(1, "rgba(255,90,140,0)");
           ctx.fillStyle = halo3; ctx.beginPath(); ctx.arc(0, 0, 62, 0, 6.29); ctx.fill();
           ctx.font = "44px " + this.EMOJI_FONT;
+          if (this.glowOk) { ctx.shadowColor = "#ff5d8a"; ctx.shadowBlur = 18; }
           const pu = 1 + Math.sin(this.time * 5 + h.p) * .07; ctx.scale(pu, pu);
           ctx.fillText("❤️", 0, 0); ctx.fillText("❤️", 0, 0);
           ctx.restore();
