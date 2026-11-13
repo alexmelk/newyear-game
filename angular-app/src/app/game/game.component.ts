@@ -318,7 +318,13 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /* ---------- реплеи ---------- */
-  openReplay(id: number | string) { location.href = "?replay=" + encodeURIComponent(id); }
+  openReplay(id: number | string) {
+    // SPA-навигация без перезагрузки: на iOS Safari присваивание location.href с query-параметром
+    // от страницы "#/" иногда не перезагружает документ — реплей «не открывался».
+    const s = "?replay=" + encodeURIComponent(id);
+    try { history.pushState(null, "", s); } catch { location.href = s; return; }
+    this.loadReplay(String(id));
+  }
 
   async loadReplay(id: string) {
     this.boardError = "⏳ Загружаю реплей…";
@@ -339,6 +345,7 @@ export class GameComponent implements OnInit, AfterViewInit, OnDestroy {
   }
   exitReplay() {
     this.replayId = "";
+    if (location.search) { try { history.pushState(null, "", location.pathname + "#/"); } catch { /* ignore */ } }
     this.engine?.exitReplay();     // hook onState("menu") перезагрузит борд
   }
   async reportCheat() {
